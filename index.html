@@ -1,0 +1,1088 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://pbzyfwvaxtuviygcicxp.supabase.co wss://pbzyfwvaxtuviygcicxp.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suivi d'avancement D08</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================
+   Design system — Maquette B (continuité pointage). Voir docs/DESIGN.md
+   ===================================================================== */
+:root{
+  --bg:#f3f5f4; --panel:#ffffff; --panel-2:#f6f8f7;
+  --ink:#17242b; --muted:#5f6b64;
+  --line:#dbdfdc; --line-strong:#b7bdb8;
+  --accent:#2f7d64; --accent-hover:#26654f; --accent-ink:#ffffff;
+  --accent-2:#16324f;
+  --green:#1f9d55; --green-bg:#e6f5ec; --green-ink:#0f6a37;
+  --amber:#d97706; --amber-bg:#fdf0e0; --amber-ink:#8a5200;
+  --red:#dc2626; --red-bg:#fbe9e9; --red-ink:#a71d1d;
+  --edit:#fffdf3;
+  --r-sm:6px; --r-md:9px; --r-lg:12px;
+  --shadow:0 6px 24px rgba(20,32,26,.08);
+  --font-head:"Archivo", system-ui, sans-serif;
+  --font-ui:"Inter", system-ui, -apple-system, sans-serif;
+  --font-mono:"IBM Plex Mono", ui-monospace, monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:15px;line-height:1.5}
+h1,h2,h3{font-family:var(--font-head);margin:0 0 .4em;font-weight:700;letter-spacing:-.005em}
+a{color:var(--accent);text-decoration:none}
+button{font-family:inherit;font-size:14px;cursor:pointer}
+.mono{font-family:var(--font-mono)}
+.muted{color:var(--muted)}
+
+/* ---------- shell ---------- */
+#root{min-height:100%}
+.app{display:grid;grid-template-columns:172px 1fr;min-height:100vh}
+.side{background:var(--accent-2);color:#dfe8f0;display:flex;flex-direction:column;padding:16px 0}
+.side .brand{font-family:var(--font-head);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fff;padding:0 18px 16px}
+.side nav a{display:block;padding:9px 18px;font-size:13px;color:#cfe0ec}
+.side nav a.on{background:var(--accent);color:#fff;font-weight:600}
+.side nav a:hover:not(.on){background:rgba(255,255,255,.06)}
+.side .side-foot{margin-top:auto;padding:12px 18px;font-size:11px;color:#8fa6b6}
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+.topbar .h{font-family:var(--font-head);font-weight:700;font-size:17px}
+.topbar .chantier{font-size:11px;font-weight:600;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:2px 9px;margin-left:8px}
+.topbar .right{display:flex;align-items:center;gap:14px}
+.topbar .ver{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.topbar .who{font-size:13px}
+.topbar .who b{font-weight:600}
+.content{padding:22px 20px;max-width:1360px;width:100%}
+
+/* ---------- centered (login / chantier choice) ---------- */
+.centered{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.auth{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);width:100%;max-width:400px;padding:32px}
+.auth .kick{font-family:var(--font-head);font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.auth h1{font-size:22px;margin:.2em 0 .1em}
+.auth .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+
+/* ---------- forms ---------- */
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:5px}
+.inp{width:100%;font-family:var(--font-ui);font-size:14px;padding:9px 11px;border-radius:var(--r-md);border:1px solid var(--line-strong);background:var(--panel);color:var(--ink)}
+.inp:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.inp.err{border-color:var(--red);background:var(--red-bg)}
+select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:30px}
+.formerr{font-size:12.5px;color:var(--red-ink);background:var(--red-bg);border-left:3px solid var(--red);border-radius:var(--r-sm);padding:8px 11px;margin-bottom:14px}
+
+/* ---------- buttons ---------- */
+.btn{font-weight:600;padding:9px 16px;border-radius:var(--r-md);border:1px solid transparent}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn.secondary{background:var(--panel);color:var(--ink);border-color:var(--line-strong)}
+.btn.secondary:hover{background:var(--panel-2)}
+.btn.ghost{background:transparent;color:var(--accent);border-color:transparent;padding:9px 8px}
+.btn.small{padding:5px 10px;font-size:12.5px}
+.btn.block{width:100%;display:block}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ---------- cards / chantier picker ---------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px}
+.pick{display:grid;gap:10px;margin-top:4px}
+.pick button{display:flex;align-items:center;justify-content:space-between;text-align:left;background:var(--panel);border:1px solid var(--line-strong);border-radius:var(--r-md);padding:14px 16px;width:100%}
+.pick button:hover{border-color:var(--accent);background:var(--panel-2)}
+.pick .code{font-family:var(--font-mono);font-size:13px;font-weight:500}
+.pick .lib{font-size:13px;color:var(--muted)}
+.pick .role{font-size:11px;font-weight:600;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:1px 8px}
+
+/* ---------- table ---------- */
+table.grid{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;font-size:13px}
+table.grid thead th{background:var(--panel-2);font-family:var(--font-head);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;padding:9px 12px;text-align:left;border-bottom:1px solid var(--line-strong)}
+table.grid td{padding:9px 12px;border-bottom:1px solid var(--line)}
+table.grid tr:last-child td{border-bottom:0}
+table.grid tbody tr:hover{background:var(--panel-2)}
+
+/* ---------- badges ---------- */
+.bdg{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;display:inline-block}
+.bdg.role{background:var(--panel-2);color:var(--accent-2);border:1px solid var(--line-strong)}
+.bdg.on{background:var(--green-bg);color:var(--green-ink)}
+.bdg.off{background:var(--panel-2);color:var(--muted);border:1px solid var(--line-strong)}
+
+/* ---------- toast ---------- */
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--accent-2);color:#fff;
+  padding:11px 18px;border-radius:var(--r-md);font-size:13.5px;box-shadow:var(--shadow);z-index:50;max-width:90vw}
+.toast.err{background:var(--red)}
+
+/* ---------- misc ---------- */
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spread{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
+.hint{font-size:12px;color:var(--muted);margin-top:8px}
+.demo-banner{background:var(--amber-bg);color:var(--amber-ink);font-size:12px;text-align:center;padding:6px 12px;border-bottom:1px solid var(--amber)}
+
+@media (max-width:720px){
+  .app{grid-template-columns:1fr}
+  .side{flex-direction:row;flex-wrap:wrap;padding:8px}
+  .side .brand{padding:6px 10px}
+  .side .side-foot{display:none}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/dist/umd/supabase.js" integrity="sha384-ysv13JVP3fufiEXfjML9OdCa/rRbMJvUBOWyor82wfuK8INNZAvmbxHgKIHi+oqz" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+/* =====================================================================
+   Suivi d'avancement chantier — lot D08 (RJH / Axima)
+   Phase 1 : socle — connexion, choix du chantier, accueil, comptes.
+   Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
+   ===================================================================== */
+
+const APP_VERSION = "0.3.1";
+
+/* ---------------------------------------------------------------------
+   Configuration du déploiement (principe PRD n°12 — neutralité).
+   Le code métier ne connaît jamais l'emplacement de la base : il parle
+   à l'objet DB ci-dessous. Trois modes possibles derrière la même
+   interface : "demo" (mémoire), "cloud" (Supabase hébergé), "local"
+   (Supabase auto-hébergé sur le réseau Axima). Voir docs/architecture.md
+   --------------------------------------------------------------------- */
+const CONFIG = {
+  mode: "cloud",
+  supabaseUrl: "https://pbzyfwvaxtuviygcicxp.supabase.co",
+  supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBienlmd3ZheHR1dml5Z2NpY3hwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MjQ0NDgsImV4cCI6MjEwNDEwMDQ0OH0.rFWzntvNpVOhQ4ekrIfs21y82CTUpvMn2vFl54U9U2g",
+};
+
+/* =====================================================================
+   Couche d'accès aux données — implémentation "demo"
+   Jeu de données bouché pour développer, tester à blanc et démontrer
+   la Phase 1 sans dépendre d'un projet Supabase.
+   ===================================================================== */
+const DEMO = {
+  chantiers: [
+    { id: "c-rjh-d08", code: "RJH-D08", libelle: "RJH — lot D08 ventilation nucléaire", actif: true },
+  ],
+  users: [
+    { id: "u-corsiez",  email: "s.corsiez@axima.fr",   nom_affiche: "S. Corsiez",   actif: true },
+    { id: "u-data",     email: "data.d08@axima.fr",    nom_affiche: "C. Bertin",    actif: true },
+    { id: "u-assist",   email: "assistante.d08@axima.fr", nom_affiche: "L. Assistante", actif: true },
+    { id: "u-conduc",   email: "conducteur.d08@axima.fr", nom_affiche: "J. Conducteur", actif: true },
+    { id: "u-planif",   email: "planning.d08@axima.fr", nom_affiche: "M. Planificateur", actif: true },
+    { id: "u-dir",      email: "direction.d08@axima.fr", nom_affiche: "Direction projet", actif: false },
+  ],
+  memberships: [
+    { chantier_id: "c-rjh-d08", user_id: "u-corsiez", role: "admin" },
+    { chantier_id: "c-rjh-d08", user_id: "u-data",    role: "ingenieur_data" },
+    { chantier_id: "c-rjh-d08", user_id: "u-assist",  role: "saisisseur" },
+    { chantier_id: "c-rjh-d08", user_id: "u-conduc",  role: "saisisseur" },
+    { chantier_id: "c-rjh-d08", user_id: "u-planif",  role: "consultant" },
+    { chantier_id: "c-rjh-d08", user_id: "u-dir",     role: "consultant" },
+  ],
+  password: "demo", // mot de passe unique en mode démo
+  // Référentiel géographique — vide au départ, alimenté par import (Phase 2)
+  geo: { batiments: [], niveaux: [], zones: [], locaux: [] },
+};
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const DB_DEMO = {
+  async login(email, password) {
+    await wait(150);
+    const u = DEMO.users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
+    if (!u || password !== DEMO.password) return { error: "Identifiant ou mot de passe incorrect." };
+    if (!u.actif) return { error: "Ce compte est désactivé. Contactez l'ingénieur DATA." }; // RG-2
+    return { user: { ...u } };
+  },
+  async chantiersOf(userId) {
+    await wait(80);
+    const ids = DEMO.memberships.filter((m) => m.user_id === userId).map((m) => m.chantier_id);
+    return DEMO.chantiers
+      .filter((c) => c.actif && ids.includes(c.id))
+      .map((c) => ({ ...c, role: DEMO.memberships.find((m) => m.chantier_id === c.id && m.user_id === userId).role }));
+  },
+  async roleOf(chantierId, userId) {
+    const m = DEMO.memberships.find((x) => x.chantier_id === chantierId && x.user_id === userId);
+    return m ? m.role : null;
+  },
+  async members(chantierId) {
+    await wait(80);
+    return DEMO.memberships
+      .filter((m) => m.chantier_id === chantierId)
+      .map((m) => ({ ...DEMO.users.find((u) => u.id === m.user_id), role: m.role }));
+  },
+  async createMember(chantierId, { email, nom_affiche, role }) {
+    await wait(120);
+    if (DEMO.users.some((u) => u.email.toLowerCase() === email.toLowerCase()))
+      return { error: "Un compte existe déjà avec cet e-mail." };
+    const u = { id: "u-" + Math.random().toString(36).slice(2, 8), email, nom_affiche, actif: true };
+    DEMO.users.push(u);
+    DEMO.memberships.push({ chantier_id: chantierId, user_id: u.id, role });
+    return { ok: true };
+  },
+  async setActive(userId, actif) { await wait(60); DEMO.users.find((u) => u.id === userId).actif = actif; return { ok: true }; },
+  async setRole(chantierId, userId, role) {
+    await wait(60);
+    DEMO.memberships.find((m) => m.chantier_id === chantierId && m.user_id === userId).role = role;
+    return { ok: true };
+  },
+
+  /* ----- Phase 2 : référentiel géographique -----
+     (chantierId ignoré en mode démo : un seul chantier géré, mais le
+     paramètre existe pour garder la même signature que le mode cloud) */
+  async geoSummary(_chantierId) {
+    await wait(60);
+    const g = DEMO.geo;
+    return { batiments: g.batiments.length, niveaux: g.niveaux.length, zones: g.zones.length, locaux: g.locaux.length };
+  },
+  async geoTree(_chantierId) {
+    await wait(60);
+    const g = DEMO.geo;
+    return g.batiments.map((b) => ({
+      ...b,
+      niveaux: g.niveaux.filter((n) => n.batiment === b.code).map((n) => ({
+        ...n,
+        zones: g.zones.filter((z) => z.niveau === n.code).map((z) => ({
+          ...z,
+          locaux: g.locaux.filter((l) => l.zone_cea === z.code_seva && l.niveau === n.code),
+        })),
+      })),
+    }));
+  },
+  async geoFindLocal(_chantierId, term) {
+    await wait(40);
+    const t = term.trim().toLowerCase();
+    if (!t) return [];
+    return DEMO.geo.locaux.filter((l) =>
+      l.code.toLowerCase().includes(t) || (l.zone_int || "").toLowerCase().includes(t) || l.zone_cea.toLowerCase().includes(t)
+    ).slice(0, 40);
+  },
+  async geoImportCommit(_chantierId, kept, _auteurId) {
+    await wait(200);
+    const g = { batiments: [], niveaux: [], zones: [], locaux: [] };
+    const seenB = new Set(), seenN = new Set(), seenZ = new Set(), seenL = new Set();
+    for (const r of kept) {
+      if (!seenB.has(r.batiment)) { seenB.add(r.batiment); g.batiments.push({ code: r.batiment }); }
+      const nk = r.batiment + "|" + r.niveau;
+      if (!seenN.has(nk)) { seenN.add(nk); g.niveaux.push({ code: r.niveau, batiment: r.batiment }); }
+      const zk = r.niveau + "|" + r.zoneCea;
+      if (!seenZ.has(zk)) { seenZ.add(zk); g.zones.push({ code_seva: r.zoneCea, code_int: r.zoneInt || null, niveau: r.niveau }); }
+      if (!seenL.has(r.local)) { seenL.add(r.local); g.locaux.push({ code: r.local, zone_cea: r.zoneCea, zone_int: r.zoneInt || null, niveau: r.niveau, batiment: r.batiment }); }
+    }
+    DEMO.geo = g;
+    return { ok: true, stats: { batiments: g.batiments.length, niveaux: g.niveaux.length, zones: g.zones.length, locaux: g.locaux.length } };
+  },
+};
+
+/* =====================================================================
+   Couche d'accès aux données — implémentation "cloud" / "local"
+   Même interface que DB_DEMO. "cloud" = Supabase hébergé, "local" =
+   Supabase auto-hébergé sur le réseau Axima (même code, autre URL —
+   principe PRD n°12, neutralité de déploiement). L'authentification et
+   la protection des données reposent sur Supabase Auth + RLS (SQL 001,
+   002, 003) : la clé "anon" est publique par construction, la sécurité
+   ne dépend jamais d'elle.
+   ===================================================================== */
+let _sb = null;
+function supa() {
+  if (!_sb) _sb = window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey);
+  return _sb;
+}
+
+let GEO_CACHE = null; // évite de rapatrier tout le référentiel à chaque frappe de recherche
+
+const DB_SUPABASE = {
+  async login(email, password) {
+    const { data, error } = await supa().auth.signInWithPassword({ email: email.trim(), password });
+    if (error) {
+      if (/confirm/i.test(error.message))
+        return { error: "E-mail non confirmé côté Supabase. Tableau de bord → Authentication → Users → ouvrez le compte → confirmez l'e-mail (ou recréez-le en cochant « Auto Confirm User »)." };
+      return { error: "Connexion refusée par Supabase : " + error.message };
+    }
+    const uid = data.user.id;
+    const { data: au, error: e2 } = await supa().from("app_user").select("*").eq("id", uid).maybeSingle();
+    if (e2 || !au) {
+      await supa().auth.signOut();
+      return { error: "Compte authentifié mais pas encore rattaché à un chantier. Contactez l'ingénieur DATA." };
+    }
+    if (!au.actif) { await supa().auth.signOut(); return { error: "Ce compte est désactivé. Contactez l'ingénieur DATA." }; } // RG-2
+    return { user: au };
+  },
+  async chantiersOf(userId) {
+    const { data, error } = await supa()
+      .from("membership")
+      .select("role, chantier:chantier_id(id,code,libelle,actif)")
+      .eq("user_id", userId);
+    if (error) { console.error(error); return []; }
+    return (data || []).filter((m) => m.chantier && m.chantier.actif).map((m) => ({ ...m.chantier, role: m.role }));
+  },
+  async roleOf(chantierId, userId) {
+    const { data } = await supa().from("membership").select("role").eq("chantier_id", chantierId).eq("user_id", userId).maybeSingle();
+    return data ? data.role : null;
+  },
+  async members(chantierId) {
+    const { data, error } = await supa()
+      .from("membership")
+      .select("role, app_user:user_id(id,email,nom_affiche,actif)")
+      .eq("chantier_id", chantierId);
+    if (error) { console.error(error); return []; }
+    return (data || []).filter((m) => m.app_user).map((m) => ({ ...m.app_user, role: m.role }));
+  },
+  async createMember(chantierId, { email, nom_affiche, role }) {
+    const { data, error } = await supa().rpc("admin_creer_membre", {
+      p_chantier_id: chantierId, p_email: email.trim(), p_nom: nom_affiche.trim(), p_role: role,
+    });
+    if (error) return { error: error.message };
+    if (data && data.error) return { error: data.error };
+    return { ok: true };
+  },
+  async setActive(userId, actif) {
+    const { error } = await supa().from("app_user").update({ actif }).eq("id", userId);
+    if (error) return { error: error.message };
+    return { ok: true };
+  },
+  async setRole(chantierId, userId, role) {
+    const { error } = await supa().from("membership").update({ role }).eq("chantier_id", chantierId).eq("user_id", userId);
+    if (error) return { error: error.message };
+    return { ok: true };
+  },
+
+  /* ----- Phase 2 : référentiel géographique ----- */
+  async geoSummary(chantierId) {
+    const [b, n, z, l] = await Promise.all([
+      supa().from("batiment").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId),
+      supa().from("niveau").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId),
+      supa().from("zone").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId),
+      supa().from("local").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId),
+    ]);
+    return { batiments: b.count || 0, niveaux: n.count || 0, zones: z.count || 0, locaux: l.count || 0 };
+  },
+  async geoTree(chantierId) {
+    const [b, n, z, l] = await Promise.all([
+      supa().from("batiment").select("*").eq("chantier_id", chantierId).order("code"),
+      supa().from("niveau").select("*").eq("chantier_id", chantierId).order("code"),
+      supa().from("zone").select("*").eq("chantier_id", chantierId).order("code_seva"),
+      supa().from("local").select("*").eq("chantier_id", chantierId).order("code"),
+    ]);
+    const batiments = b.data || [], niveaux = n.data || [], zones = z.data || [], locaux = l.data || [];
+    GEO_CACHE = { batiments, niveaux, zones, locaux };
+    return batiments.map((bt) => ({
+      code: bt.code,
+      niveaux: niveaux.filter((nv) => nv.batiment_id === bt.id).map((nv) => ({
+        code: nv.code,
+        zones: zones.filter((zn) => zn.niveau_id === nv.id).map((zn) => ({
+          code_seva: zn.code_seva, code_int: zn.code_interne,
+          locaux: locaux.filter((lc) => lc.zone_id === zn.id).map((lc) => ({
+            code: lc.code, zone_cea: zn.code_seva, zone_int: zn.code_interne, niveau: nv.code, batiment: bt.code,
+          })),
+        })),
+      })),
+    }));
+  },
+  async geoFindLocal(chantierId, term) {
+    if (!GEO_CACHE) await DB_SUPABASE.geoTree(chantierId);
+    const t = term.trim().toLowerCase();
+    if (!t) return [];
+    const { batiments, niveaux, zones, locaux } = GEO_CACHE;
+    const byId = (arr) => Object.fromEntries(arr.map((x) => [x.id, x]));
+    const bB = byId(batiments), bN = byId(niveaux), bZ = byId(zones);
+    return locaux
+      .filter((l) => l.code.toLowerCase().includes(t) || (bZ[l.zone_id]?.code_interne || "").toLowerCase().includes(t) || (bZ[l.zone_id]?.code_seva || "").toLowerCase().includes(t))
+      .slice(0, 40)
+      .map((l) => { const z = bZ[l.zone_id], n = bN[z.niveau_id], bt = bB[n.batiment_id];
+        return { code: l.code, zone_cea: z.code_seva, zone_int: z.code_interne, niveau: n.code, batiment: bt.code }; });
+  },
+  async geoImportCommit(chantierId, kept, auteurId) {
+    const sb = supa();
+    const uniq = (arr) => [...new Set(arr)];
+
+    const codesB = uniq(kept.map((r) => r.batiment));
+    await sb.from("batiment").upsert(codesB.map((code) => ({ chantier_id: chantierId, code })), { onConflict: "chantier_id,code", ignoreDuplicates: true });
+    const { data: allB } = await sb.from("batiment").select("id,code").eq("chantier_id", chantierId);
+    const idB = Object.fromEntries(allB.map((b) => [b.code, b.id]));
+
+    const niv = uniq(kept.map((r) => r.batiment + "|" + r.niveau)).map((k) => { const [batiment, code] = k.split("|"); return { chantier_id: chantierId, batiment_id: idB[batiment], code }; });
+    await sb.from("niveau").upsert(niv, { onConflict: "batiment_id,code", ignoreDuplicates: true });
+    const { data: allN } = await sb.from("niveau").select("id,code,batiment_id").eq("chantier_id", chantierId);
+    const idN = Object.fromEntries(allN.map((n) => [n.batiment_id + "|" + n.code, n.id]));
+
+    const zn = uniq(kept.map((r) => r.batiment + "|" + r.niveau + "|" + r.zoneCea)).map((k) => { const [batiment, niveau, code_seva] = k.split("|"); const r = kept.find((x) => x.batiment === batiment && x.niveau === niveau && x.zoneCea === code_seva); return { chantier_id: chantierId, niveau_id: idN[idB[batiment] + "|" + niveau], code_seva, code_interne: r.zoneInt || null }; });
+    await sb.from("zone").upsert(zn, { onConflict: "niveau_id,code_seva", ignoreDuplicates: true });
+    const { data: allZ } = await sb.from("zone").select("id,code_seva,niveau_id").eq("chantier_id", chantierId);
+    const idZ = Object.fromEntries(allZ.map((z) => [z.niveau_id + "|" + z.code_seva, z.id]));
+
+    const loc = uniq(kept.map((r) => r.local)).map((code) => { const r = kept.find((x) => x.local === code); const nid = idN[idB[r.batiment] + "|" + r.niveau]; return { chantier_id: chantierId, zone_id: idZ[nid + "|" + r.zoneCea], code }; });
+    await sb.from("local").upsert(loc, { onConflict: "chantier_id,code", ignoreDuplicates: true });
+
+    await sb.from("import_lot").insert({ chantier_id: chantierId, type: "geo", statut: "valide", lignes_retenues: kept.length, auteur_id: auteurId, valide_le: new Date().toISOString() });
+
+    GEO_CACHE = null; // invalide le cache de recherche
+    return { ok: true, stats: await DB_SUPABASE.geoSummary(chantierId) };
+  },
+};
+
+/* Sélection de l'implémentation — même interface, seule la source de
+   données change (principe PRD n°12). */
+const DB = CONFIG.mode === "demo" ? DB_DEMO : DB_SUPABASE;
+
+/* =====================================================================
+   Session (survit à un rechargement via sessionStorage)
+   ===================================================================== */
+const ROLE_LABEL = {
+  ingenieur_data: "Ingénieur DATA",
+  saisisseur: "Saisisseur",
+  consultant: "Consultant",
+  admin: "Administrateur",
+};
+const PEUT_GERER_COMPTES = (role) => role === "ingenieur_data" || role === "admin"; // RG-5
+
+const Session = {
+  get() { try { return JSON.parse(sessionStorage.getItem("d08.session") || "null"); } catch { return null; } },
+  set(s) { sessionStorage.setItem("d08.session", JSON.stringify(s)); },
+  clear() { sessionStorage.removeItem("d08.session"); },
+};
+
+/* =====================================================================
+   Utilitaires d'affichage
+   ===================================================================== */
+const $ = (sel, el = document) => el.querySelector(sel);
+const root = () => document.getElementById("root");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let toastTimer;
+function toast(msg, kind) {
+  clearTimeout(toastTimer);
+  document.querySelectorAll(".toast").forEach((t) => t.remove());
+  const t = document.createElement("div");
+  t.className = "toast" + (kind === "err" ? " err" : "");
+  t.textContent = msg;
+  document.body.appendChild(t);
+  toastTimer = setTimeout(() => t.remove(), 3600);
+}
+
+function go(hash) { location.hash = hash; }
+
+/* =====================================================================
+   Routeur
+   ===================================================================== */
+async function route() {
+  const s = Session.get();
+  const hash = location.hash.replace(/^#/, "") || "/";
+
+  if (!s) return renderLogin();
+  if (!s.chantier) return renderChantierPick(s);
+
+  if (hash.startsWith("/comptes")) return renderComptes(s);
+  if (hash.startsWith("/referentiels/geo")) return renderGeo(s);
+  if (hash.startsWith("/referentiels")) return renderReferentiels(s);
+  return renderAccueil(s);
+}
+window.addEventListener("hashchange", route);
+window.addEventListener("DOMContentLoaded", route);
+
+/* =====================================================================
+   Écran — Connexion (RG-1)
+   ===================================================================== */
+function renderLogin(prefillErr) {
+  root().innerHTML = `
+    <div class="centered">
+      <form class="auth" id="lgf">
+        <div class="kick">Suivi d'avancement</div>
+        <h1>Lot D08 — RJH</h1>
+        <div class="sub">Connexion avec votre compte Axima nominatif.</div>
+        ${prefillErr ? `<div class="formerr">${esc(prefillErr)}</div>` : ""}
+        <div class="field">
+          <label for="lg-email">Adresse e-mail</label>
+          <input class="inp" id="lg-email" type="email" autocomplete="username" autocapitalize="none" placeholder="prenom.nom@axima.fr">
+        </div>
+        <div class="field">
+          <label for="lg-pass">Mot de passe</label>
+          <input class="inp" id="lg-pass" type="password" autocomplete="current-password">
+        </div>
+        <button class="btn primary block" type="submit" id="lg-go">Se connecter</button>
+        ${CONFIG.mode === "demo" ? `<div class="hint">Démo : <span class="mono">data.d08@axima.fr</span> / <span class="mono">demo</span> — ou <span class="mono">s.corsiez@axima.fr</span>, <span class="mono">assistante.d08@axima.fr</span>…</div>` : ""}
+      </form>
+    </div>`;
+  $("#lgf").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("#lg-go");
+    btn.disabled = true; btn.textContent = "Connexion…";
+    const res = await DB.login($("#lg-email").value, $("#lg-pass").value);
+    if (res.error) { btn.disabled = false; btn.textContent = "Se connecter"; return renderLogin(res.error); }
+    Session.set({ user: res.user, chantier: null });
+    route();
+  });
+}
+
+/* =====================================================================
+   Écran — Choix du chantier (RG-3)
+   ===================================================================== */
+async function renderChantierPick(s) {
+  root().innerHTML = `<div class="centered"><div class="auth"><div class="kick">Bonjour ${esc(s.user.nom_affiche)}</div><h1>Chantier</h1><div class="sub">Chargement…</div></div></div>`;
+  const list = await DB.chantiersOf(s.user.id);
+
+  if (list.length === 0) {
+    root().innerHTML = `<div class="centered"><div class="auth">
+      <div class="kick">Bonjour ${esc(s.user.nom_affiche)}</div>
+      <h1>Aucun chantier</h1>
+      <div class="sub">Votre compte n'est rattaché à aucun chantier. Contactez l'ingénieur DATA.</div>
+      <button class="btn secondary" id="lo">Se déconnecter</button>
+    </div></div>`;
+    $("#lo").onclick = deconnexion;
+    return;
+  }
+  if (list.length === 1) { // RG-3 — un seul chantier : accès direct
+    Session.set({ ...s, chantier: { id: list[0].id, code: list[0].code, libelle: list[0].libelle }, role: list[0].role });
+    return route();
+  }
+  root().innerHTML = `<div class="centered"><div class="auth">
+    <div class="kick">Bonjour ${esc(s.user.nom_affiche)}</div>
+    <h1>Choisir un chantier</h1>
+    <div class="sub">Vous avez accès à ${list.length} chantiers.</div>
+    <div class="pick">
+      ${list.map((c) => `<button data-id="${c.id}">
+        <span><span class="code">${esc(c.code)}</span><br><span class="lib">${esc(c.libelle)}</span></span>
+        <span class="role">${ROLE_LABEL[c.role]}</span>
+      </button>`).join("")}
+    </div>
+    <div class="hint"><a href="#" id="lo">Se déconnecter</a></div>
+  </div></div>`;
+  root().querySelectorAll(".pick button").forEach((b) => b.onclick = () => {
+    const c = list.find((x) => x.id === b.dataset.id);
+    Session.set({ ...s, chantier: { id: c.id, code: c.code, libelle: c.libelle }, role: c.role });
+    route();
+  });
+  $("#lo").onclick = (e) => { e.preventDefault(); deconnexion(); };
+}
+
+function deconnexion() { Session.clear(); go("/"); route(); }
+function changerChantier() { const s = Session.get(); Session.set({ user: s.user, chantier: null }); go("/"); route(); }
+
+/* =====================================================================
+   Coquille (barre latérale + bandeau) commune aux écrans connectés
+   ===================================================================== */
+function shell(s, activeKey, title, bodyHTML) {
+  const gere = PEUT_GERER_COMPTES(s.role);
+  const nav = [
+    ["accueil", "Accueil", "#/"],
+    gere ? ["referentiels", "Référentiels", "#/referentiels"] : null,
+    gere ? ["comptes", "Comptes", "#/comptes"] : null,
+  ].filter(Boolean);
+  root().innerHTML = `
+    <div class="app">
+      <aside class="side">
+        <div class="brand">D08 · Avancement</div>
+        <nav>
+          ${nav.map(([k, lbl, href]) => `<a href="${href}" class="${k === activeKey ? "on" : ""}">${lbl}</a>`).join("")}
+        </nav>
+        <div class="side-foot">Phase 1 — socle<br>Les autres écrans (saisie, avancement,<br>référentiels…) arrivent aux phases suivantes.</div>
+      </aside>
+      <div class="main">
+        ${CONFIG.mode === "demo" ? `<div class="demo-banner">Mode démonstration — données fictives, aucune connexion à une base réelle.</div>` : ""}
+        <div class="topbar">
+          <div><span class="h">${esc(title)}</span><span class="chantier">${esc(s.chantier.code)}</span></div>
+          <div class="right">
+            <span class="who"><b>${esc(s.user.nom_affiche)}</b> · ${ROLE_LABEL[s.role]}</span>
+            <span class="ver mono">v${APP_VERSION}</span>
+            <button class="btn ghost small" id="sh-chg">Changer</button>
+            <button class="btn secondary small" id="sh-lo">Quitter</button>
+          </div>
+        </div>
+        <div class="content">${bodyHTML}</div>
+      </div>
+    </div>`;
+  $("#sh-lo").onclick = deconnexion;
+  $("#sh-chg").onclick = changerChantier;
+}
+
+/* =====================================================================
+   Écran — Accueil
+   ===================================================================== */
+function renderAccueil(s) {
+  const gere = PEUT_GERER_COMPTES(s.role);
+  shell(s, "accueil", "Accueil", `
+    <div class="card" style="max-width:640px">
+      <h2>Bienvenue, ${esc(s.user.nom_affiche)}</h2>
+      <p class="muted">Vous êtes connecté au chantier <b>${esc(s.chantier.libelle)}</b> avec le rôle <b>${ROLE_LABEL[s.role]}</b>.</p>
+      <table class="grid" style="margin-top:14px">
+        <tbody>
+          <tr><td class="muted">Chantier actif</td><td><span class="mono">${esc(s.chantier.code)}</span> — ${esc(s.chantier.libelle)}</td></tr>
+          <tr><td class="muted">Votre rôle</td><td>${ROLE_LABEL[s.role]}</td></tr>
+          <tr><td class="muted">Version de l'application</td><td class="mono">v${APP_VERSION}</td></tr>
+          <tr><td class="muted">Mode de déploiement</td><td>${CONFIG.mode}</td></tr>
+        </tbody>
+      </table>
+      ${gere ? `<p style="margin-top:16px"><a class="btn primary small" href="#/comptes">Gérer les comptes</a></p>`
+             : `<p class="hint" style="margin-top:16px">La gestion des comptes est réservée à l'ingénieur DATA et à l'administrateur.</p>`}
+    </div>
+    <p class="hint">Phase 1 livrée : connexion, choix du chantier, accueil, comptes. Prochaine phase : référentiel géographique.</p>
+  `);
+}
+
+/* =====================================================================
+   Écran — Comptes (RG-5 : ingénieur DATA / admin uniquement)
+   ===================================================================== */
+async function renderComptes(s) {
+  if (!PEUT_GERER_COMPTES(s.role)) { go("/"); return route(); }
+  shell(s, "comptes", "Comptes", `<div class="card"><div class="muted">Chargement…</div></div>`);
+  const members = await DB.members(s.chantier.id);
+
+  const roleOpts = (sel) => Object.entries(ROLE_LABEL)
+    .map(([k, v]) => `<option value="${k}"${k === sel ? " selected" : ""}>${v}</option>`).join("");
+
+  $(".content").innerHTML = `
+    <div class="spread">
+      <h2 style="margin:0">Comptes du chantier</h2>
+      <span class="muted">${members.length} compte${members.length > 1 ? "s" : ""}</span>
+    </div>
+
+    <table class="grid">
+      <thead><tr><th>Nom</th><th>E-mail</th><th>Rôle</th><th>Statut</th><th></th></tr></thead>
+      <tbody>
+        ${members.map((m) => `
+          <tr data-uid="${m.id}">
+            <td>${esc(m.nom_affiche)}</td>
+            <td class="mono" style="font-size:12px">${esc(m.email)}</td>
+            <td>
+              <select class="inp js-role" style="padding:4px 26px 4px 8px;font-size:12.5px;width:auto"${m.id === s.user.id ? " disabled" : ""}>
+                ${roleOpts(m.role)}
+              </select>
+            </td>
+            <td>${m.actif ? '<span class="bdg on">Actif</span>' : '<span class="bdg off">Désactivé</span>'}</td>
+            <td style="text-align:right">
+              ${m.id === s.user.id ? '<span class="hint">vous</span>'
+                : `<button class="btn secondary small js-toggle">${m.actif ? "Désactiver" : "Réactiver"}</button>`}
+            </td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+
+    <div class="card" style="margin-top:20px;max-width:560px">
+      <h3 style="margin-bottom:12px">Ajouter un compte</h3>
+      <form id="newf">
+        <div class="field"><label>Nom affiché</label><input class="inp" id="n-nom" placeholder="P. Nom" required></div>
+        <div class="field"><label>Adresse e-mail</label><input class="inp" id="n-email" type="email" autocapitalize="none" placeholder="prenom.nom@axima.fr" required></div>
+        <div class="field"><label>Rôle</label><select class="inp" id="n-role">${roleOpts("saisisseur")}</select></div>
+        <button class="btn primary" type="submit" id="n-go">Créer le compte</button>
+      </form>
+      <div class="hint">Le compte est créé actif. En mode réel, l'utilisateur recevra une invitation pour définir son mot de passe.</div>
+    </div>
+  `;
+
+  root().querySelectorAll("tr[data-uid]").forEach((tr) => {
+    const uid = tr.dataset.uid;
+    const tg = tr.querySelector(".js-toggle");
+    if (tg) tg.onclick = async () => {
+      const m = members.find((x) => x.id === uid);
+      await DB.setActive(uid, !m.actif);
+      toast(m.actif ? "Compte désactivé." : "Compte réactivé.");
+      renderComptes(Session.get());
+    };
+    const rs = tr.querySelector(".js-role");
+    if (rs && !rs.disabled) rs.onchange = async () => {
+      await DB.setRole(s.chantier.id, uid, rs.value);
+      toast("Rôle mis à jour — " + ROLE_LABEL[rs.value] + ".");
+    };
+  });
+
+  $("#newf").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("#n-go"); btn.disabled = true;
+    const res = await DB.createMember(s.chantier.id, {
+      nom_affiche: $("#n-nom").value.trim(),
+      email: $("#n-email").value.trim(),
+      role: $("#n-role").value,
+    });
+    btn.disabled = false;
+    if (res.error) return toast(res.error, "err");
+    toast("Compte créé.");
+    renderComptes(Session.get());
+  });
+}
+
+/* ===== PHASE 2 — référentiel géographique ===== */
+
+/* Jeu de démonstration : extraction du référentiel géographique RJH
+   (ancienne base). Défauts volontairement conservés pour éprouver la
+   prévisualisation d'import (doublon de local, locaux non nommés,
+   désignations internes manquantes). Format : une ligne par local. */
+const GEO_DEMO_CSV = `Bâtiment;Niveau;Zone (CEA);Zone (interne);Local
+BMN;MN+0;MN+0ZM0;MN+0ZM0;MN+0S00
+BMR;MR+0;MR+0ZM0;MR+0ZM0;MR+0
+BUA;UA+0;UA+0ZM0;UA+0ZM0;//
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S01
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S02
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S03
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S05
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S06
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S07
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S10
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S12
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S15
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S16
+BUA;UA+1;UA+1ZM11;ZRF;UA+1S17
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S18
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S19
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S20
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S26
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S28
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S03
+BUA;UA+2;UA+2ZM11;ZRF;UA+2S13
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S12
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S11
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S01
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S08
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S15
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S04
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S06
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S05
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S52
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S51
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S01
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S02
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S03
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S04
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S05
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S06
+BUA;UA-1;UA-1ZM11;ZRF;UA-1S07
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S08
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S09
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S10
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S11
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S12
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S14
+BUA;UA-1;UA-1ZM11;ZRF;UA-1S16
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S17
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S18
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S19
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S20
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S21
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S22
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S23
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S24
+BUA;UA-1;UA-1ZM10;Hors-ZRF;UA-1S25
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S01
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S03
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S04
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S05
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S06
+BUA;UA-2;UA-2ZM11;ZRF;UA-2S07
+BUA;UA-2;UA-2ZM11;ZRF;UA-2S09
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S10
+BUA;UA-2;UA-2ZM11;ZRF;UA-2S11
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S12
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S13
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S14
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S17
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S19
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S20
+BUA;UA-2;UA-2ZM11;ZRF;UA-2S21
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S22
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S24
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S25
+BUA;UA-2;UA-2ZM10;Hors-ZRF;UA-2S26
+BUA;UA-2;UA-2ZM11;ZRF;UA-2S27
+BUA;UA-2;UA-2ZM11;ZRF;UA-2S28
+BUA;UA-2;UA-2ZM11;ZRF;UA-2S29
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S01
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S03
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S04
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S05
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S06
+BUA;UA-3;UA-3ZM11;ZRF;UA-3S07
+BUA;UA-3;UA-3ZM11;ZRF;UA-3S08
+BUA;UA-3;UA-3ZM11;ZRF;UA-3S09
+BUA;UA-3;UA-3ZM11;ZRF;UA-3S10
+BUA;UA-3;UA-3ZM11;ZRF;UA-3S11
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S12
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S13
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S14
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S16
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S17
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S18
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S19
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S20
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S20_1E
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S20_RDC
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S21
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S22
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S23
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S24
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S26
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S27
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S28
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S29
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S91
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S93
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S94
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S95
+BUR;UR-2;UR-2ZM06;None;UR-2S06
+BUR;UR-2;UR-2ZM06;None;UR-2S07
+BUR;UR-2;UR-2ZM06;None;UR-2S09
+BUR;UR-2;UR-2ZM05;None;UR-2S10
+BUR;UR-3;UR-3ZM05;None;UR-3S09
+BUR;UR-3;UR-3ZM05;None;UR-3S10
+BUR;UR-3;UR-3ZM05;None;UR-3S11
+BUA;UA-3;UA-3ZM10;Hors-ZRF;UA-3S15
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S01
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S02
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S04
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S05
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S06
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S10
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S11
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S12
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S13
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S15
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S17
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S18
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S19
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S20
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S21
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S22
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S24
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S50
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S51
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S52
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S53
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S54
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S55
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S56
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S57
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S58
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S59
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S60
+BUA;UA+0;UA+0ZM10;Hors-ZRF;UA+0S90
+BUA;UA+1;UA+1ZM11;ZRF;UA+1S17
+BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S13
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S02
+BUA;UA+2;UA+2ZM11;ZRF;UA+2S07
+BUA;UA+2;UA+2ZM10;Hors-ZRF;UA+2S09
+BUA;UA+1;UA+1ZM11;ZRF;UA+1S14
+BAS.A;ASA+0;ASA+0ZM00;ASA+0ZM00;ASA+0S01
+BAS.A;ASA+0;ASA+0ZM00;ASA+0ZM00;ASA+0S02
+BAS.A;ASA+0;ASA+0ZM00;ASA+0ZM00;ASA+0S03
+BAS.A;ASA+0;ASA+0ZM00;ASA+0ZM00;ASA+0S04
+BAS.A;ASA+0;ASA+0ZM00;ASA+0ZM00;ASA+0S06
+BAS.A;ASA+0;ASA+0ZM00;ASA+0ZM00;ASA+0S08`;
+
+/* Analyse d'un contenu CSV géographique — sépare le bon grain
+   (lignes retenables) des anomalies, listées ligne par ligne (RG-11). */
+function analyseGeoCsv(text) {
+  const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim() !== "");
+  if (!lines.length) return { erreurGlobale: "Fichier vide." };
+  // détecte le séparateur sur l'en-tête
+  const head = lines[0];
+  const sep = (head.match(/;/g) || []).length >= (head.match(/,/g) || []).length ? ";" : ",";
+  const isHeader = /b[aâ]timent/i.test(head);
+  const body = isHeader ? lines.slice(1) : lines;
+
+  const rows = [];
+  const vusLocal = new Map();
+  const c = { erreur: 0, doublon: 0, avert: 0, ok: 0 };
+
+  body.forEach((raw, i) => {
+    const cols = raw.split(sep).map((x) => x.trim());
+    const [batiment = "", niveau = "", zoneCea = "", zoneInt = "", local = ""] = cols;
+    const problems = [];
+
+    if (!batiment || !niveau || !zoneCea || !local)
+      problems.push({ level: "erreur", msg: "ligne incomplète (bâtiment, niveau, zone CEA et local sont obligatoires)" });
+
+    if (local && (local === "//" || local === niveau))
+      problems.push({ level: "avert", msg: "local non nommé — à préciser avec les équipes" });
+
+    if (!zoneInt || /^none$/i.test(zoneInt))
+      problems.push({ level: "avert", msg: "désignation interne manquante — la désignation SEVA sera utilisée" });
+
+    let doublon = false;
+    if (local) {
+      if (vusLocal.has(local)) { doublon = true; problems.push({ level: "doublon", msg: "local déjà présent ligne " + vusLocal.get(local) }); }
+      else vusLocal.set(local, i + (isHeader ? 2 : 1));
+    }
+
+    const bloquant = problems.some((p) => p.level === "erreur") || doublon;
+    if (bloquant) { if (doublon) c.doublon++; else c.erreur++; }
+    else if (problems.length) c.avert++;
+    else c.ok++;
+
+    rows.push({ line: i + (isHeader ? 2 : 1), batiment, niveau, zoneCea, zoneInt, local, problems, bloquant });
+  });
+
+  const kept = rows.filter((r) => !r.bloquant);
+  const uniq = (arr) => [...new Set(arr)];
+  const stats = {
+    lignes: rows.length,
+    batiments: uniq(kept.map((r) => r.batiment)).length,
+    niveaux: uniq(kept.map((r) => r.batiment + "|" + r.niveau)).length,
+    zones: uniq(kept.map((r) => r.niveau + "|" + r.zoneCea)).length,
+    locaux: uniq(kept.map((r) => r.local)).length,
+  };
+  return { rows, kept, stats, counts: c, sep, avaitEntete: isHeader };
+}
+
+/* ---------------------------------------------------------------------
+   Écran — Référentiels (hub)
+   --------------------------------------------------------------------- */
+async function renderReferentiels(s) {
+  if (!PEUT_GERER_COMPTES(s.role)) { go("/"); return route(); }
+  shell(s, "referentiels", "Référentiels", '<div class="card"><div class="muted">Chargement…</div></div>');
+  const g = await DB.geoSummary(s.chantier.id);
+  $(".content").innerHTML = `
+    <h2>Référentiels du chantier</h2>
+    <p class="muted">Les données d'entrée alimentées par l'ingénieur DATA. Le reste (ouvrages, activités) arrive à la phase 3.</p>
+    <div class="pick" style="max-width:640px;margin-top:14px">
+      <button onclick="location.hash='#/referentiels/geo'">
+        <span><span class="code">Référentiel géographique</span><br>
+        <span class="lib">${g.locaux ? `${g.batiments} bâtiments · ${g.niveaux} niveaux · ${g.zones} zones · ${g.locaux} locaux` : "non chargé — à importer"}</span></span>
+        <span class="role">${g.locaux ? "chargé" : "vide"}</span>
+      </button>
+      <button disabled style="opacity:.55;cursor:default">
+        <span><span class="code">Ouvrages, métiers, activités</span><br><span class="lib">Phase 3</span></span>
+        <span class="role">à venir</span>
+      </button>
+    </div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Écran — Référentiel géographique (consultation + import)
+   --------------------------------------------------------------------- */
+let GEO_PENDING = null; // analyse en attente de validation
+
+async function renderGeo(s) {
+  if (!PEUT_GERER_COMPTES(s.role)) { go("/"); return route(); }
+  shell(s, "referentiels", "Référentiel géographique", '<div class="card"><div class="muted">Chargement…</div></div>');
+  const sum = await DB.geoSummary(s.chantier.id);
+
+  $(".content").innerHTML = `
+    <div class="spread">
+      <h2 style="margin:0"><a href="#/referentiels" style="font-weight:400;font-size:13px">Référentiels</a> &nbsp;›&nbsp; Géographique</h2>
+      <span class="muted">${sum.locaux ? `${sum.locaux} locaux` : "vide"}</span>
+    </div>
+
+    <div class="card" style="margin-bottom:18px">
+      <h3 style="margin-bottom:10px">Importer</h3>
+      <p class="hint" style="margin-top:0">Format attendu : une ligne par local — <span class="mono">Bâtiment ; Niveau ; Zone (CEA) ; Zone (interne) ; Local</span>. Séparateur <span class="mono">;</span> ou <span class="mono">,</span>.</p>
+      <div class="row" style="margin-top:6px">
+        <input type="file" id="geo-file" accept=".csv,text/csv,text/plain" class="inp" style="max-width:280px">
+        <button class="btn secondary small" id="geo-demo">Charger le jeu RJH de démonstration</button>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label>… ou coller les lignes</label>
+        <textarea class="inp" id="geo-paste" rows="4" placeholder="Bâtiment;Niveau;Zone (CEA);Zone (interne);Local&#10;BUA;UA+1;UA+1ZM10;Hors-ZRF;UA+1S01"></textarea>
+      </div>
+      <button class="btn primary" id="geo-analyse">Prévisualiser</button>
+      <div id="geo-preview"></div>
+    </div>
+
+    <div id="geo-browse"></div>
+  `;
+
+  $("#geo-demo").onclick = () => { $("#geo-paste").value = GEO_DEMO_CSV; toast("Jeu de démonstration chargé — cliquez « Prévisualiser »."); };
+  $("#geo-file").onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => { $("#geo-paste").value = rd.result; toast("Fichier lu — cliquez « Prévisualiser »."); };
+    rd.readAsText(f, "utf-8");
+  };
+  $("#geo-analyse").onclick = () => {
+    const txt = $("#geo-paste").value.trim();
+    if (!txt) return toast("Aucune donnée à prévisualiser.", "err");
+    GEO_PENDING = analyseGeoCsv(txt);
+    paintGeoPreview();
+  };
+
+  paintGeoBrowse();
+}
+
+function paintGeoPreview() {
+  const a = GEO_PENDING;
+  const el = $("#geo-preview");
+  if (!a) { el.innerHTML = ""; return; }
+  if (a.erreurGlobale) { el.innerHTML = `<div class="formerr" style="margin-top:12px">${esc(a.erreurGlobale)}</div>`; return; }
+
+  const anomalies = a.rows.filter((r) => r.problems.length);
+  el.innerHTML = `
+    <div style="margin-top:16px">
+      <div class="row" style="gap:18px;font-size:13px">
+        <span><b>${a.stats.lignes}</b> lignes lues</span>
+        <span><b>${a.stats.batiments}</b> bâtiments</span>
+        <span><b>${a.stats.niveaux}</b> niveaux</span>
+        <span><b>${a.stats.zones}</b> zones</span>
+        <span><b>${a.stats.locaux}</b> locaux</span>
+      </div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        ${a.counts.erreur ? `<span class="bdg" style="background:var(--red-bg);color:var(--red-ink)">${a.counts.erreur} erreur${a.counts.erreur > 1 ? "s" : ""}</span>` : ""}
+        ${a.counts.doublon ? `<span class="bdg" style="background:var(--red-bg);color:var(--red-ink)">${a.counts.doublon} doublon${a.counts.doublon > 1 ? "s" : ""}</span>` : ""}
+        ${a.counts.avert ? `<span class="bdg flag" style="background:var(--amber-bg);color:var(--amber-ink)">${a.counts.avert} avertissement${a.counts.avert > 1 ? "s" : ""}</span>` : ""}
+        <span class="bdg on">${a.kept.length} lignes retenues</span>
+      </div>
+
+      ${anomalies.length ? `
+      <table class="grid" style="margin-top:12px">
+        <thead><tr><th>Ligne</th><th>Local</th><th>Contenu</th><th>Anomalie</th></tr></thead>
+        <tbody>
+          ${anomalies.slice(0, 60).map((r) => `
+            <tr${r.bloquant ? ' style="background:var(--red-bg)"' : ' style="background:var(--amber-bg)"'}>
+              <td class="mono">${r.line}</td>
+              <td class="mono">${esc(r.local || "—")}</td>
+              <td class="mono" style="font-size:11px">${esc([r.batiment, r.niveau, r.zoneCea, r.zoneInt].join(" ; "))}</td>
+              <td>${r.problems.map((p) => `<div style="color:${p.level === "avert" ? "var(--amber-ink)" : "var(--red-ink)"}">${esc(p.msg)}</div>`).join("")}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+      ${anomalies.length > 60 ? `<div class="hint">… ${anomalies.length - 60} autres anomalies non affichées</div>` : ""}
+      ` : `<div class="al ok" style="margin-top:12px">Aucune anomalie détectée.</div>`}
+
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="geo-commit"${a.kept.length ? "" : " disabled"}>Valider l'import (${a.kept.length} lignes)</button>
+        <button class="btn secondary" id="geo-cancel">Annuler</button>
+        <span class="hint">Les lignes en erreur ou en doublon ne sont pas importées. Les avertissements le sont.</span>
+      </div>
+    </div>`;
+
+  const cm = $("#geo-commit");
+  if (cm) cm.onclick = async () => {
+    cm.disabled = true; cm.textContent = "Import…";
+    const res = await DB.geoImportCommit(Session.get().chantier.id, a.kept, Session.get().user.id);
+    GEO_PENDING = null;
+    toast(`Import validé — ${res.stats.locaux} locaux, ${res.stats.zones} zones, ${res.stats.niveaux} niveaux, ${res.stats.batiments} bâtiments.`);
+    renderGeo(Session.get());
+  };
+  $("#geo-cancel").onclick = () => { GEO_PENDING = null; paintGeoPreview(); toast("Import annulé — rien n'a été écrit."); };
+}
+
+async function paintGeoBrowse() {
+  const box = $("#geo-browse");
+  const tree = await DB.geoTree(Session.get().chantier.id);
+  if (!tree.length) { box.innerHTML = `<div class="card"><div class="muted">Référentiel vide. Importez pour commencer.</div></div>`; return; }
+
+  box.innerHTML = `
+    <div class="spread"><h3 style="margin:0">Consulter</h3></div>
+    <div class="field" style="max-width:340px"><input class="inp" id="geo-search" placeholder="Rechercher un local (code SEVA ou interne)"></div>
+    <div id="geo-results"></div>
+    <div class="tree card" style="margin-top:12px">
+      ${tree.map((b) => `
+        <details class="lvl-b">
+          <summary><b class="mono">${esc(b.code)}</b> <span class="muted">— ${b.niveaux.length} niveaux</span></summary>
+          ${b.niveaux.map((n) => `
+            <details class="lvl-n">
+              <summary class="mono">${esc(n.code)} <span class="muted">— ${n.zones.length} zones</span></summary>
+              ${n.zones.map((z) => `
+                <div class="lvl-z">
+                  <div class="mono zhead">${esc(z.code_seva)}${z.code_int && z.code_int !== z.code_seva ? ` <span class="muted">/ ${esc(z.code_int)}</span>` : ""} <span class="muted">— ${z.locaux.length} locaux</span></div>
+                  <div class="lvl-l">${z.locaux.map((l) => `<span class="loc mono">${esc(l.code)}</span>`).join("")}</div>
+                </div>`).join("")}
+            </details>`).join("")}
+        </details>`).join("")}
+    </div>`;
+
+  const si = $("#geo-search");
+  si.oninput = async () => {
+    const res = await DB.geoFindLocal(Session.get().chantier.id, si.value);
+    const rb = $("#geo-results");
+    if (!si.value.trim()) { rb.innerHTML = ""; return; }
+    rb.innerHTML = res.length
+      ? `<table class="grid" style="margin:8px 0"><thead><tr><th>Local</th><th>Zone SEVA</th><th>Zone interne</th><th>Niveau</th><th>Bâtiment</th></tr></thead><tbody>${res.map((l) => `<tr><td class="mono">${esc(l.code)}</td><td class="mono">${esc(l.zone_cea)}</td><td class="mono">${esc(l.zone_int || "—")}</td><td class="mono">${esc(l.niveau)}</td><td class="mono">${esc(l.batiment)}</td></tr>`).join("")}</tbody></table>`
+      : `<div class="hint" style="margin:8px 0">Aucun local ne correspond.</div>`;
+  };
+}
+
+</script>
+</body>
+</html>
