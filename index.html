@@ -147,7 +147,7 @@ table.grid label:has(input[type="checkbox"]){display:flex!important;align-items:
    Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
    ===================================================================== */
 
-const APP_VERSION = "0.7.1";
+const APP_VERSION = "0.8.0";
 
 /* ---------------------------------------------------------------------
    Configuration du déploiement (principe PRD n°12 — neutralité).
@@ -2169,11 +2169,34 @@ async function renderSaisie(s) {
         </table>
         <button class="btn secondary small" id="sa-add" style="margin-top:8px" type="button">+ Ajouter une ligne</button>
         <div class="hint">Astuce : Entrée dans « Points bloquants » ajoute une nouvelle ligne sans lâcher le clavier.</div>
+
+        <details style="margin-top:14px">
+          <summary style="cursor:pointer;font-size:13px;color:var(--accent);font-weight:600">Coller un bloc depuis Excel</summary>
+          <div style="margin-top:8px;max-width:640px">
+            <p class="hint" style="margin-top:0">Colonnes, dans l'ordre : Type d'ouvrage · Repère fonctionnel · Activité · Valeur (quantité, ou opérations séparées par « | ») · Commentaire · Points bloquants · Soldé (oui/non). Sélectionnez un bloc dans Excel, copiez (Ctrl/Cmd+C), collez ci-dessous.</p>
+            <textarea class="inp" id="sa-paste" rows="3" placeholder="Gaine de ventilation	GV-BUA-UA1-S12-015	Pose	3000			non"></textarea>
+            <button class="btn secondary small" id="sa-paste-add" type="button" style="margin-top:8px">Ajouter ces lignes au tableau</button>
+          </div>
+        </details>
       </div>
       <div id="sa-errs"></div>
       <div class="row" style="margin-top:14px">
         <button class="btn primary" id="sa-save">Enregistrer la déclaration</button>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <h3 style="margin-bottom:10px">Importer un template Excel (plusieurs jours)</h3>
+      <p class="hint" style="margin-top:0">Colonnes : Date (AAAA-MM-JJ) · Équipe · Corps de métier · Local · Type d'ouvrage · Repère fonctionnel · Activité · Valeur · Commentaire · Points bloquants · Soldé (oui/non). Une déclaration est créée par combinaison date + équipe + corps de métier + local.</p>
+      <div class="row">
+        <input type="file" id="imp-av-file" accept=".csv,text/csv,text/plain" class="inp" style="max-width:280px">
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label>… ou coller les lignes</label>
+        <textarea class="inp" id="imp-av-paste" rows="3" placeholder="Date;Équipe;Corps de métier;Local;Type d'ouvrage;Repère fonctionnel;Activité;Valeur;Commentaire;Points bloquants;Soldé"></textarea>
+      </div>
+      <button class="btn primary" id="imp-av-analyse">Prévisualiser</button>
+      <div id="imp-av-preview"></div>
     </div>
     `}
 
@@ -2213,6 +2236,21 @@ async function renderSaisie(s) {
     $("#sa-local").onchange = refreshAllRepereOptions;
     $("#sa-add").onclick = () => addSaisieRow();
     $("#sa-save").onclick = () => saveSaisie(s);
+    $("#sa-paste-add").onclick = () => {
+      const res = appendPastedRows($("#sa-paste").value);
+      if (!res.total) return toast("Rien à coller.", "err");
+      toast(`${res.ajoutees} ligne${res.ajoutees > 1 ? "s" : ""} ajoutée${res.ajoutees > 1 ? "s" : ""} au tableau.` + (res.ignorees ? ` ${res.ignorees} ignorée(s) — type d'ouvrage non reconnu.` : ""));
+      $("#sa-paste").value = "";
+    };
+
+    $("#imp-av-file").onchange = (e) => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { $("#imp-av-paste").value = rd.result; toast("Fichier lu — cliquez « Prévisualiser »."); }; rd.readAsText(f, "utf-8"); };
+    $("#imp-av-analyse").onclick = async () => {
+      const txt = $("#imp-av-paste").value.trim();
+      if (!txt) return toast("Aucune donnée à prévisualiser.", "err");
+      const ouvrageIndex = await DB.ouvrageIndex(s.chantier.id);
+      AV_IMPORT_PENDING = analyseAvancementCsv(txt, tree, ouvrageIndex);
+      paintAvancementImportPreview(s);
+    };
   }
 
   paintDeclarationsRecentes(s);
@@ -2513,6 +2551,205 @@ async function paintAvancementDetail(s, ouvrageId, row) {
     </div>
   `;
   $("#av-detail-close").onclick = () => { box.innerHTML = ""; };
+}
+
+/* ===== PHASE 6 — saisie rapide (collage + import template) ===== */
+
+let AV_IMPORT_PENDING = null;
+
+/* ---- Collage d'un bloc depuis Excel dans la grille de saisie (US-10) ----
+   Format : Type d'ouvrage \t Repère \t Activité \t Valeur \t Commentaire \t
+   Points bloquants \t Soldé (tabulations natives d'un copier Excel, ou ;).
+   Chaque ligne collée crée une vraie ligne de grille (addSaisieRow), donc
+   passe par exactement les mêmes contrôles que la saisie manuelle au
+   moment d'Enregistrer (US-10 AC : "mêmes contrôles"). */
+function parsePasteBlock(text) {
+  return text.replace(/\r/g, "").split("\n").filter((l) => l.trim() !== "").map((line) => {
+    const sep = line.includes("\t") ? "\t" : ";";
+    const cols = line.split(sep).map((c) => c.trim());
+    const [type = "", repere = "", activite = "", valeur = "", commentaire = "", pointsBloquants = "", soldeRaw = ""] = cols;
+    return { type, repere, activite, valeur, commentaire, pointsBloquants, solde: /^(oui|vrai|true|1|x)$/i.test(soldeRaw.trim()) };
+  });
+}
+
+function appendPastedRows(text) {
+  const parsed = parsePasteBlock(text);
+  let ajoutees = 0, ignorees = 0;
+  parsed.forEach((p) => {
+    const t = SAISIE_TYPES.find((x) => x.code.toLowerCase() === p.type.toLowerCase() || x.libelle.toLowerCase() === p.type.toLowerCase());
+    if (!t) { ignorees++; return; }
+    addSaisieRow();
+    const tr = $("#sa-tbody").lastElementChild;
+    const typeSel = tr.querySelector(".sa-type");
+    typeSel.value = t.code;
+    typeSel.dispatchEvent(new Event("change"));
+    const repSel = tr.querySelector(".sa-repere");
+    const repOpt = [...repSel.options].find((o) => o.value.toLowerCase() === p.repere.toLowerCase());
+    if (repOpt) repSel.value = repOpt.value;
+    const actSel = tr.querySelector(".sa-activite");
+    const actOpt = [...actSel.options].find((o) => o.value.toLowerCase() === p.activite.toLowerCase() || o.textContent.toLowerCase() === p.activite.toLowerCase());
+    if (actOpt) actSel.value = actOpt.value;
+    if (t.nature === "quantite") {
+      const q = tr.querySelector(".sa-quantite");
+      if (q) q.value = p.valeur.replace(",", ".");
+    } else {
+      const wanted = p.valeur.split(/[|,]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+      tr.querySelectorAll(".sa-op").forEach((cb) => {
+        const lbl = (cb.closest("label").textContent || "").trim().toLowerCase();
+        if (wanted.includes(cb.value.toLowerCase()) || wanted.includes(lbl)) cb.checked = true;
+      });
+    }
+    tr.querySelector(".sa-commentaire").value = p.commentaire;
+    tr.querySelector(".sa-bloquants").value = p.pointsBloquants;
+    tr.querySelector(".sa-solde").checked = p.solde;
+    ajoutees++;
+  });
+  return { ajoutees, ignorees, total: parsed.length };
+}
+
+/* ---- Import d'un template Excel multi-jours (US-11) ----
+   Une déclaration par combinaison (date, équipe, corps de métier, local) ;
+   mêmes contrôles que la saisie manuelle, plus un doublon "date + repère +
+   activité" propre à ce mode (deux lignes identiques dans un même import). */
+function analyseAvancementCsv(text, metiersTree, ouvrageIndex) {
+  const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim() !== "");
+  if (!lines.length) return { erreurGlobale: "Fichier vide." };
+  const head = lines[0];
+  const sep = head.includes("\t") ? "\t" : ((head.match(/;/g) || []).length >= (head.match(/,/g) || []).length ? ";" : ",");
+  const isHeader = /date/i.test(head) && /rep[eè]re/i.test(head);
+  const body = isHeader ? lines.slice(1) : lines;
+
+  const typeIndex = new Map();
+  metiersTree.forEach((cm) => cm.types.forEach((t) => {
+    typeIndex.set((cm.code + "|" + t.code).toLowerCase(), { ...t, corps: cm.code });
+    typeIndex.set((cm.code + "|" + t.libelle).toLowerCase(), { ...t, corps: cm.code });
+  }));
+  const ouvrageByKey = new Map();
+  ouvrageIndex.forEach((o) => ouvrageByKey.set([o.corpsMetier, o.typeCode, o.local, o.repere].join("|").toLowerCase(), o));
+
+  const rows = [];
+  const vus = new Map();
+  const c = { erreur: 0, doublon: 0, avert: 0, ok: 0 };
+
+  body.forEach((raw, i) => {
+    const cols = raw.split(sep).map((x) => x.trim());
+    const [date = "", equipe = "", corpsMetier = "", local = "", typeRaw = "", repere = "", activiteRaw = "", valeurRaw = "", commentaire = "", pointsBloquants = "", soldeRaw = ""] = cols;
+    const problems = [];
+
+    if (!date || !corpsMetier || !local || !typeRaw || !repere || !activiteRaw)
+      problems.push({ level: "erreur", msg: "ligne incomplète (date, corps de métier, local, type d'ouvrage, repère et activité sont obligatoires)" });
+
+    const type = typeIndex.get((corpsMetier + "|" + typeRaw).toLowerCase());
+    if (corpsMetier && typeRaw && !type) problems.push({ level: "erreur", msg: "corps de métier ou type d'ouvrage inconnu du référentiel" });
+
+    const ouv = type && repere && local ? ouvrageByKey.get([corpsMetier, type.code, local, repere].join("|").toLowerCase()) : null;
+    if (type && repere && local && !ouv) problems.push({ level: "erreur", msg: "repère introuvable au référentiel pour ce type et ce local" });
+
+    let activite = null;
+    if (type) activite = type.activites.find((a) => a.code.toLowerCase() === activiteRaw.toLowerCase() || a.libelle.toLowerCase() === activiteRaw.toLowerCase());
+    if (type && activiteRaw && !activite) problems.push({ level: "erreur", msg: "activité inconnue pour ce type d'ouvrage" });
+
+    let quantite = null, operationsFaites = [];
+    if (type && type.nature === "quantite") {
+      quantite = valeurRaw ? Number(valeurRaw.replace(",", ".")) : null;
+      if (quantite == null || !Number.isFinite(quantite) || quantite <= 0) problems.push({ level: "erreur", msg: "quantité manquante ou aberrante (doit être un nombre positif)" });
+    } else if (type) {
+      const wanted = valeurRaw.split(/[|,]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+      operationsFaites = type.operations.filter((o) => wanted.includes(o.code.toLowerCase()) || wanted.includes(o.libelle.toLowerCase())).map((o) => o.code);
+    }
+    const solde = /^(oui|vrai|true|1|x)$/i.test(soldeRaw.trim());
+
+    let doublon = false;
+    const dk = [date, repere, activiteRaw].join("|").toLowerCase();
+    if (date && repere && activiteRaw) {
+      if (vus.has(dk)) { doublon = true; problems.push({ level: "doublon", msg: "même date + repère + activité que la ligne " + vus.get(dk) }); }
+      else vus.set(dk, i + (isHeader ? 2 : 1));
+    }
+
+    const bloquant = problems.some((p) => p.level === "erreur") || doublon;
+    if (bloquant) { if (doublon) c.doublon++; else c.erreur++; } else if (problems.length) c.avert++; else c.ok++;
+
+    rows.push({
+      line: i + (isHeader ? 2 : 1), date, equipe, corpsMetier: type ? type.corps : corpsMetier, local,
+      typeCode: type ? type.code : typeRaw, repere, activiteCode: activite ? activite.code : activiteRaw,
+      quantite, operationsFaites, commentaire, pointsBloquants, solde, problems, bloquant,
+    });
+  });
+
+  const kept = rows.filter((r) => !r.bloquant);
+  const uniq = (arr) => [...new Set(arr)];
+  const stats = { lignes: rows.length, retenues: kept.length, declarations: uniq(kept.map((r) => [r.date, r.equipe, r.corpsMetier, r.local].join("||"))).length };
+  return { rows, kept, stats, counts: c, sep };
+}
+
+function paintAvancementImportPreview(s) {
+  const a = AV_IMPORT_PENDING;
+  const el = $("#imp-av-preview");
+  if (!a) { el.innerHTML = ""; return; }
+  if (a.erreurGlobale) { el.innerHTML = `<div class="formerr" style="margin-top:12px">${esc(a.erreurGlobale)}</div>`; return; }
+
+  const anomalies = a.rows.filter((r) => r.problems.length);
+  el.innerHTML = `
+    <div style="margin-top:16px">
+      <div class="row" style="gap:18px;font-size:13px">
+        <span><b>${a.stats.lignes}</b> lignes lues</span>
+        <span><b>${a.stats.declarations}</b> déclarations à créer</span>
+      </div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        ${a.counts.erreur ? `<span class="bdg" style="background:var(--red-bg);color:var(--red-ink)">${a.counts.erreur} erreur${a.counts.erreur > 1 ? "s" : ""}</span>` : ""}
+        ${a.counts.doublon ? `<span class="bdg" style="background:var(--red-bg);color:var(--red-ink)">${a.counts.doublon} doublon${a.counts.doublon > 1 ? "s" : ""}</span>` : ""}
+        <span class="bdg on">${a.kept.length} lignes retenues</span>
+      </div>
+      ${anomalies.length ? `
+      <table class="grid" style="margin-top:12px">
+        <thead><tr><th>Ligne</th><th>Date</th><th>Repère</th><th>Anomalie</th></tr></thead>
+        <tbody>
+          ${anomalies.slice(0, 60).map((r) => `
+            <tr${r.bloquant ? ' style="background:var(--red-bg)"' : ' style="background:var(--amber-bg)"'}>
+              <td class="mono">${r.line}</td>
+              <td class="mono">${esc(r.date || "—")}</td>
+              <td class="mono">${esc(r.repere || "—")}</td>
+              <td>${r.problems.map((p) => `<div style="color:${p.level === "avert" ? "var(--amber-ink)" : "var(--red-ink)"}">${esc(p.msg)}</div>`).join("")}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>` : `<div class="al ok" style="margin-top:12px">Aucune anomalie détectée.</div>`}
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="imp-av-commit"${a.kept.length ? "" : " disabled"}>Valider l'import (${a.stats.declarations} déclaration${a.stats.declarations > 1 ? "s" : ""})</button>
+        <button class="btn secondary" id="imp-av-cancel">Annuler</button>
+        <span class="hint">Les lignes en erreur ou en doublon ne sont pas importées.</span>
+      </div>
+    </div>`;
+
+  const cm = $("#imp-av-commit");
+  if (cm) cm.onclick = async () => {
+    cm.disabled = true; cm.textContent = "Import…";
+    const res = await avancementImportCommit(s.chantier.id, a.kept, s.user.id);
+    AV_IMPORT_PENDING = null;
+    if (res.error) return toast(res.error, "err");
+    toast(`Import validé — ${res.declarations} déclaration${res.declarations > 1 ? "s" : ""}, ${res.lignes} ligne${res.lignes > 1 ? "s" : ""}.`);
+    renderSaisie(Session.get());
+  };
+  $("#imp-av-cancel").onclick = () => { AV_IMPORT_PENDING = null; paintAvancementImportPreview(s); toast("Import annulé — rien n'a été écrit."); };
+}
+
+/* Regroupe les lignes retenues par déclaration (date+équipe+métier+local)
+   et rejoue DB.declarationCreate pour chacune — même chemin de code,
+   même garanties, qu'une saisie manuelle ou un collage (US-11 AC :
+   "indiscernable à la consultation"). */
+async function avancementImportCommit(chantierId, kept, auteurId) {
+  const groups = {};
+  kept.forEach((r) => {
+    const key = [r.date, r.equipe, r.corpsMetier, r.local].join("||");
+    if (!groups[key]) groups[key] = { date: r.date, equipe: r.equipe, corpsMetierCode: r.corpsMetier, localCode: r.local, lignes: [] };
+    groups[key].lignes.push({ typeCode: r.typeCode, repere: r.repere, activiteCode: r.activiteCode, quantite: r.quantite, operationsFaites: r.operationsFaites, commentaire: r.commentaire, pointsBloquants: r.pointsBloquants, solde: r.solde });
+  });
+  let declarations = 0, lignes = 0;
+  for (const g of Object.values(groups)) {
+    const res = await DB.declarationCreate(chantierId, g, auteurId);
+    if (res.error) return { error: `Déclaration du ${g.date} (${g.local}) : ${res.error}` };
+    declarations++; lignes += g.lignes.length;
+  }
+  return { ok: true, declarations, lignes };
 }
 
 </script>
