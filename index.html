@@ -114,6 +114,8 @@ table.grid tbody tr:hover{background:var(--panel-2)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .spread{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
 .hint{font-size:12px;color:var(--muted);margin-top:8px}
+input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent);cursor:pointer;vertical-align:middle;margin-right:6px}
+table.grid label:has(input[type="checkbox"]){display:flex!important;align-items:center;gap:0;padding:3px 0;cursor:pointer}
 .demo-banner{background:var(--amber-bg);color:var(--amber-ink);font-size:12px;text-align:center;padding:6px 12px;border-bottom:1px solid var(--amber)}
 
 @media (max-width:720px){
@@ -134,7 +136,7 @@ table.grid tbody tr:hover{background:var(--panel-2)}
    Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
    ===================================================================== */
 
-const APP_VERSION = "0.5.0";
+const APP_VERSION = "0.6.0";
 
 /* ---------------------------------------------------------------------
    Configuration du déploiement (principe PRD n°12 — neutralité).
@@ -335,10 +337,20 @@ const DB_DEMO = {
   /* ----- Phase 4 : saisie d'une déclaration et traçabilité ----- */
   async ouvrageIndex(_chantierId) {
     await wait(40);
-    return DEMO.ouvrages.map((o) => ({ id: o.id, repere: o.repere, typeCode: o.typeCode, corpsMetier: o.corpsMetier }));
+    return DEMO.ouvrages.map((o) => ({ id: o.id, repere: o.repere, typeCode: o.typeCode, corpsMetier: o.corpsMetier, local: o.local }));
   },
   async declarationCreate(_chantierId, payload, auteurId) {
     await wait(150);
+    // RF = liste fermée (référentiel BE) : on résout tous les ouvrages AVANT
+    // d'écrire quoi que ce soit — aucune création à la volée.
+    const metiers = DEMO.metiers;
+    const resolved = [];
+    for (const l of payload.lignes) {
+      const ouv = DEMO.ouvrages.find((o) => o.repere === l.repere);
+      if (!ouv) return { error: `Repère « ${l.repere} » introuvable au référentiel — rechargez la page et réessayez.` };
+      resolved.push({ l, ouv });
+    }
+
     const decl = {
       id: "d-" + Math.random().toString(36).slice(2, 9),
       date: payload.date, equipe: payload.equipe, local: payload.localCode, corpsMetier: payload.corpsMetierCode,
@@ -346,16 +358,7 @@ const DB_DEMO = {
     };
     DEMO.declarations.push(decl);
 
-    const metiers = DEMO.metiers;
-    const lignesInconnues = [];
-    for (const l of payload.lignes) {
-      let ouv = DEMO.ouvrages.find((o) => o.repere === l.repere);
-      if (!ouv) {
-        const t = metiers.typeOuvrage.find((t) => t.corps === payload.corpsMetierCode && t.code === l.typeCode);
-        ouv = { id: "ov-" + Math.random().toString(36).slice(2, 9), repere: l.repere, corpsMetier: payload.corpsMetierCode, typeCode: l.typeCode, typeLibelle: t ? t.libelle : l.typeCode, unite: t ? t.unite : "", nature: t ? t.nature : "quantite", local: payload.localCode, quantitePrevue: null, statut: "a_rattacher" };
-        DEMO.ouvrages.push(ouv);
-        lignesInconnues.push(l.repere);
-      }
+    for (const { l, ouv } of resolved) {
       const act = metiers.activite.find((a) => a.corps === payload.corpsMetierCode && a.type === l.typeCode && a.code === l.activiteCode);
       DEMO.lignes.push({
         id: "l-" + Math.random().toString(36).slice(2, 9), declarationId: decl.id, ouvrageId: ouv.id,
@@ -366,7 +369,7 @@ const DB_DEMO = {
         auteurId, creeLe: new Date().toISOString(), modifieLe: new Date().toISOString(),
       });
     }
-    return { ok: true, declarationId: decl.id, lignesInconnues };
+    return { ok: true, declarationId: decl.id };
   },
   async declarationRecent(_chantierId, opts) {
     await wait(60);
@@ -666,10 +669,10 @@ const DB_SUPABASE = {
   async ouvrageIndex(chantierId) {
     const { data, error } = await supa()
       .from("ouvrage")
-      .select("id, repere_fonctionnel, type_ouvrage:type_ouvrage_id(code, corps_metier:corps_metier_id(code))")
+      .select("id, repere_fonctionnel, type_ouvrage:type_ouvrage_id(code, corps_metier:corps_metier_id(code)), local:local_id(code)")
       .eq("chantier_id", chantierId);
     if (error) { console.error(error); return []; }
-    return (data || []).map((o) => ({ id: o.id, repere: o.repere_fonctionnel, typeCode: o.type_ouvrage && o.type_ouvrage.code, corpsMetier: o.type_ouvrage && o.type_ouvrage.corps_metier && o.type_ouvrage.corps_metier.code }));
+    return (data || []).map((o) => ({ id: o.id, repere: o.repere_fonctionnel, typeCode: o.type_ouvrage && o.type_ouvrage.code, corpsMetier: o.type_ouvrage && o.type_ouvrage.corps_metier && o.type_ouvrage.corps_metier.code, local: o.local && o.local.code }));
   },
   async declarationCreate(chantierId, payload, auteurId) {
     const sb = supa();
@@ -682,27 +685,26 @@ const DB_SUPABASE = {
     if (locErr || !locRow) return { error: "Local introuvable au référentiel géographique." };
     const cmId = idCM[payload.corpsMetierCode];
 
+    // RF = liste fermée (référentiel BE) : on résout tous les ouvrages AVANT
+    // d'écrire quoi que ce soit — aucune création à la volée.
+    const reperes = [...new Set(payload.lignes.map((l) => l.repere))];
+    const { data: ouvRows, error: ouvErr } = await sb.from("ouvrage").select("id, repere_fonctionnel").eq("chantier_id", chantierId).in("repere_fonctionnel", reperes);
+    if (ouvErr) return { error: ouvErr.message };
+    const idOuv = Object.fromEntries((ouvRows || []).map((o) => [o.repere_fonctionnel, o.id]));
+    const manquant = reperes.find((r) => !idOuv[r]);
+    if (manquant) return { error: `Repère « ${manquant} » introuvable au référentiel — rechargez la page et réessayez.` };
+
     const { data: decl, error: declErr } = await sb.from("declaration").insert({
       chantier_id: chantierId, date_decl: payload.date, equipe: payload.equipe || null, local_id: locRow.id, corps_metier_id: cmId, auteur_id: auteurId,
     }).select("id").single();
     if (declErr) return { error: declErr.message };
 
-    const lignesInconnues = [];
     const lignesRows = [];
     for (const l of payload.lignes) {
       const tId = idT[cmId + "|" + l.typeCode];
-      let ouv = null;
-      const found = await sb.from("ouvrage").select("id").eq("chantier_id", chantierId).eq("repere_fonctionnel", l.repere).maybeSingle();
-      ouv = found.data;
-      if (!ouv) {
-        const created = await sb.from("ouvrage").insert({ chantier_id: chantierId, repere_fonctionnel: l.repere, local_id: locRow.id, type_ouvrage_id: tId, quantite_prevue: null, statut: "a_rattacher" }).select("id").single();
-        if (created.error) return { error: created.error.message };
-        ouv = created.data;
-        lignesInconnues.push(l.repere);
-      }
       const aId = idA[tId + "|" + l.activiteCode] || null;
       lignesRows.push({
-        chantier_id: chantierId, declaration_id: decl.id, ouvrage_id: ouv.id, activite_id: aId,
+        chantier_id: chantierId, declaration_id: decl.id, ouvrage_id: idOuv[l.repere], activite_id: aId,
         quantite: l.quantite, operations_faites: l.operationsFaites || [], commentaire: l.commentaire || null, points_bloquants: l.pointsBloquants || null, solde: !!l.solde, auteur_id: auteurId,
       });
     }
@@ -710,7 +712,7 @@ const DB_SUPABASE = {
       const { error: lErr } = await sb.from("ligne_declaration").insert(lignesRows);
       if (lErr) return { error: lErr.message };
     }
-    return { ok: true, declarationId: decl.id, lignesInconnues };
+    return { ok: true, declarationId: decl.id };
   },
   async declarationRecent(chantierId, opts) {
     const limit = (opts && opts.limit) || 20;
@@ -1848,6 +1850,7 @@ async function paintOuvragesBrowse(s) {
 /* ===== PHASE 4 — saisie d'une déclaration et traçabilité ===== */
 
 let SAISIE_TYPES = [];
+let SAISIE_REPERES_INDEX = [];
 let SAISIE_ROW_SEQ = 0;
 
 function saisieValeurCell(type) {
@@ -1858,6 +1861,30 @@ function saisieValeurCell(type) {
   return (type.operations || []).map((o) => `<label style="display:block;font-size:12px;font-weight:400"><input type="checkbox" class="sa-op" value="${esc(o.code)}"> ${esc(o.libelle)}</label>`).join("") || `<span class="muted">aucune opération définie</span>`;
 }
 
+// RF = liste fermée (référentiel BE) : les options du repère sont limitées
+// au type d'ouvrage de la ligne ET au local choisi en en-tête.
+function repereOptionsFor(typeCode) {
+  const localCode = $("#sa-local").value;
+  const metierCode = $("#sa-metier").value;
+  if (!localCode || !typeCode) return [];
+  return SAISIE_REPERES_INDEX.filter((o) => o.corpsMetier === metierCode && o.typeCode === typeCode && o.local === localCode);
+}
+
+function refreshRowRepereOptions(tr) {
+  const typeSel = tr.querySelector(".sa-type");
+  const repSel = tr.querySelector(".sa-repere");
+  const localCode = $("#sa-local").value;
+  const opts = repereOptionsFor(typeSel.value);
+  const kept = opts.some((o) => o.repere === repSel.value) ? repSel.value : "";
+  let placeholder = "— choisir —";
+  if (!typeSel.value) placeholder = "— choisir un type d'ouvrage d'abord —";
+  else if (!localCode) placeholder = "— choisir un local en en-tête d'abord —";
+  else if (!opts.length) placeholder = "aucun ouvrage de ce type sur ce local";
+  repSel.innerHTML = `<option value="">${placeholder}</option>` + opts.map((o) => `<option value="${esc(o.repere)}">${esc(o.repere)}</option>`).join("");
+  repSel.value = kept;
+  repSel.disabled = !opts.length;
+}
+
 function addSaisieRow() {
   const tbody = $("#sa-tbody");
   const key = "r" + (SAISIE_ROW_SEQ++);
@@ -1865,7 +1892,7 @@ function addSaisieRow() {
   tr.dataset.row = key;
   tr.innerHTML = `
     <td><select class="inp sa-type" style="min-width:150px"><option value="">—</option>${SAISIE_TYPES.map((t) => `<option value="${esc(t.code)}">${esc(t.libelle)}</option>`).join("")}</select></td>
-    <td><input class="inp sa-repere mono" style="min-width:150px" placeholder="repère fonctionnel"></td>
+    <td><select class="inp sa-repere mono" style="min-width:170px"><option value="">— choisir un type d'abord —</option></select></td>
     <td><select class="inp sa-activite" style="min-width:140px"><option value="">—</option></select></td>
     <td class="sa-valeur">—</td>
     <td><input class="inp sa-commentaire" style="min-width:140px"></td>
@@ -1881,18 +1908,20 @@ function addSaisieRow() {
     const t = SAISIE_TYPES.find((x) => x.code === typeSel.value);
     actSel.innerHTML = `<option value="">—</option>` + (t ? t.activites.map((a) => `<option value="${esc(a.code)}">${esc(a.libelle)}</option>`).join("") : "");
     valCell.innerHTML = saisieValeurCell(t);
+    refreshRowRepereOptions(tr);
   };
   tr.querySelector(".sa-del").onclick = () => tr.remove();
   tr.querySelector(".sa-bloquants").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); addSaisieRow(); tbody.lastElementChild.querySelector(".sa-type").focus(); }
   });
+  refreshRowRepereOptions(tr);
   typeSel.focus();
 }
 
 function readSaisieRows() {
   return [...document.querySelectorAll("#sa-tbody tr[data-row]")].map((tr) => {
     const typeCode = tr.querySelector(".sa-type").value;
-    const repere = tr.querySelector(".sa-repere").value.trim();
+    const repere = tr.querySelector(".sa-repere").value;
     const activiteCode = tr.querySelector(".sa-activite").value;
     const t = SAISIE_TYPES.find((x) => x.code === typeCode);
     let quantite = null, operationsFaites = [];
@@ -1912,17 +1941,13 @@ function readSaisieRows() {
   });
 }
 
-function validateSaisieRows(rows, ouvrageIndex) {
+function validateSaisieRows(rows) {
   const errors = [];
   const seen = new Map();
   rows.forEach((r, i) => {
     const msgs = [];
     if (!r.typeCode || !r.repere || !r.activiteCode)
       msgs.push("champ obligatoire manquant (type d'ouvrage, repère ou activité)");
-
-    const existing = ouvrageIndex.find((o) => o.repere === r.repere);
-    if (existing && r.typeCode && existing.typeCode && existing.typeCode !== r.typeCode)
-      msgs.push(`type d'ouvrage incohérent — ce repère est déjà connu comme « ${existing.typeCode} »`);
 
     if (r.nature === "quantite") {
       if (r.quantite == null) { if (!msgs.some((m) => m.includes("obligatoire"))) msgs.push("quantité manquante"); }
@@ -1950,6 +1975,7 @@ async function renderSaisie(s) {
   const geoTree = await DB.geoTree(s.chantier.id);
   const locaux = [];
   geoTree.forEach((b) => b.niveaux.forEach((n) => n.zones.forEach((z) => z.locaux.forEach((l) => locaux.push(l.code)))));
+  SAISIE_REPERES_INDEX = await DB.ouvrageIndex(s.chantier.id);
 
   $(".content").innerHTML = `
     <h2>Nouvelle déclaration</h2>
@@ -1959,7 +1985,7 @@ async function renderSaisie(s) {
         <div class="field" style="margin:0"><label>Date</label><input class="inp" id="sa-date" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
         <div class="field" style="margin:0"><label>Équipe</label><input class="inp" id="sa-equipe" placeholder="Noms de l'équipe" style="min-width:220px"></div>
         <div class="field" style="margin:0"><label>Corps de métier</label><select class="inp" id="sa-metier"><option value="">— choisir —</option>${tree.map((cm) => `<option value="${esc(cm.code)}">${esc(cm.code)}</option>`).join("")}</select></div>
-        <div class="field" style="margin:0"><label>Local</label><input class="inp" id="sa-local" list="sa-locaux" placeholder="ex. UA+1S12"><datalist id="sa-locaux">${locaux.map((c) => `<option value="${esc(c)}">`).join("")}</datalist></div>
+        <div class="field" style="margin:0"><label>Local</label><select class="inp" id="sa-local" style="min-width:160px"><option value="">— choisir —</option>${[...new Set(locaux)].sort().map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></div>
       </div>
 
       <div id="sa-grid-wrap" style="margin-top:16px;display:none">
@@ -1984,6 +2010,7 @@ async function renderSaisie(s) {
   `;
 
   if (tree.length) {
+    const refreshAllRepereOptions = () => document.querySelectorAll("#sa-tbody tr[data-row]").forEach(refreshRowRepereOptions);
     $("#sa-metier").onchange = () => {
       const cm = tree.find((c) => c.code === $("#sa-metier").value);
       SAISIE_TYPES = cm ? cm.types : [];
@@ -1991,6 +2018,7 @@ async function renderSaisie(s) {
       $("#sa-grid-wrap").style.display = SAISIE_TYPES.length ? "" : "none";
       if (SAISIE_TYPES.length) addSaisieRow();
     };
+    $("#sa-local").onchange = refreshAllRepereOptions;
     $("#sa-add").onclick = () => addSaisieRow();
     $("#sa-save").onclick = () => saveSaisie(s);
   }
@@ -2013,8 +2041,7 @@ async function saveSaisie(s) {
   if (!localCode) globalMsgs.push("Le local est obligatoire.");
   if (!rows.length) globalMsgs.push("Ajoutez au moins une ligne.");
 
-  const ouvrageIndex = await DB.ouvrageIndex(s.chantier.id);
-  const rowErrors = validateSaisieRows(rows, ouvrageIndex);
+  const rowErrors = validateSaisieRows(rows);
 
   document.querySelectorAll("#sa-tbody tr").forEach((tr) => (tr.style.background = ""));
   if (globalMsgs.length || rowErrors.length) {
@@ -2031,7 +2058,7 @@ async function saveSaisie(s) {
   btn.disabled = false; btn.textContent = "Enregistrer la déclaration";
   if (res.error) return toast(res.error, "err");
 
-  toast(`Déclaration enregistrée — ${rows.length} ligne${rows.length > 1 ? "s" : ""}.` + (res.lignesInconnues.length ? ` ${res.lignesInconnues.length} repère(s) inconnu(s) signalé(s) à l'ingénieur DATA.` : ""));
+  toast(`Déclaration enregistrée — ${rows.length} ligne${rows.length > 1 ? "s" : ""}.`);
   renderSaisie(Session.get());
 }
 
