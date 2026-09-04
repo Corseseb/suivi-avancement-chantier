@@ -105,6 +105,17 @@ table.grid tbody tr:hover{background:var(--panel-2)}
 .bdg.on{background:var(--green-bg);color:var(--green-ink)}
 .bdg.off{background:var(--panel-2);color:var(--muted);border:1px solid var(--line-strong)}
 
+/* ---------- kpis / progress bar (Avancement) ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px}
+.kpi .k{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.kpi .v{font-family:var(--font-head);font-weight:700;font-size:21px;font-variant-numeric:tabular-nums;margin-top:3px}
+.kpi.flag{border-color:var(--amber);background:var(--amber-bg)}
+.kpi.flag .v,.kpi.flag .k{color:var(--amber-ink)}
+.bar{position:relative;height:6px;width:60px;border-radius:3px;background:var(--line);overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px}
+.bar>i{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:3px}
+td.rf{font-family:var(--font-mono);font-size:12px}
+
 /* ---------- toast ---------- */
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--accent-2);color:#fff;
   padding:11px 18px;border-radius:var(--r-md);font-size:13.5px;box-shadow:var(--shadow);z-index:50;max-width:90vw}
@@ -136,7 +147,7 @@ table.grid label:has(input[type="checkbox"]){display:flex!important;align-items:
    Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
    ===================================================================== */
 
-const APP_VERSION = "0.6.2";
+const APP_VERSION = "0.7.0";
 
 /* ---------------------------------------------------------------------
    Configuration du déploiement (principe PRD n°12 — neutralité).
@@ -416,6 +427,66 @@ const DB_DEMO = {
     return DEMO.journal.filter((j) => j.enregistrementId === enregistrementId)
       .sort((a, b) => (a.faitLe < b.faitLe ? 1 : -1))
       .map((j) => ({ ...j, auteurNom: (DEMO.users.find((u) => u.id === j.auteurId) || {}).nom_affiche || "—" }));
+  },
+
+  /* ----- Phase 5 : consultation de l'avancement ----- */
+  async avancementList(_chantierId, filters) {
+    await wait(90);
+    const f = filters || {};
+    const locInfo = Object.fromEntries(DEMO.geo.locaux.map((l) => [l.code, l]));
+    const declById = Object.fromEntries(DEMO.declarations.map((d) => [d.id, d]));
+    const inRange = (dateStr) => {
+      if (f.dateDebut && dateStr < f.dateDebut) return false;
+      if (f.dateFin && dateStr > f.dateFin) return false;
+      return true;
+    };
+
+    let rows = DEMO.ouvrages.map((o) => {
+      const li = locInfo[o.local] || {};
+      const lignes = DEMO.lignes
+        .filter((l) => l.ouvrageId === o.id)
+        .map((l) => ({ ...l, decl: declById[l.declarationId] }))
+        .filter((l) => l.decl && inRange(l.decl.date));
+      const opsTotal = DEMO.metiers.operation.filter((op) => op.corps === o.corpsMetier && op.type === o.typeCode).length;
+
+      let quantitePosee = null, operationsFaitesUnion = [];
+      if (o.nature === "quantite") {
+        quantitePosee = lignes.reduce((sum, l) => sum + (Number(l.quantite) || 0), 0);
+      } else {
+        const set = new Set();
+        lignes.forEach((l) => (l.operationsFaites || []).forEach((code) => set.add(code)));
+        operationsFaitesUnion = [...set];
+      }
+      const soldeAtteint = lignes.some((l) => l.solde);
+
+      return {
+        ouvrageId: o.id, repere: o.repere, local: o.local, batiment: li.batiment || "", niveau: li.niveau || "",
+        corpsMetier: o.corpsMetier, typeCode: o.typeCode, typeLibelle: o.typeLibelle, unite: o.unite, nature: o.nature,
+        quantitePrevue: o.quantitePrevue, quantitePosee, operationsFaitesUnion, operationsTotal: opsTotal,
+        soldeAtteint, nbDeclarations: lignes.length, statut: o.statut,
+      };
+    });
+
+    if (f.batiments && f.batiments.length) rows = rows.filter((r) => f.batiments.includes(r.batiment));
+    if (f.niveau) rows = rows.filter((r) => r.niveau === f.niveau);
+    if (f.corpsMetiers && f.corpsMetiers.length) rows = rows.filter((r) => f.corpsMetiers.includes(r.corpsMetier));
+    if (f.typeOuvrages && f.typeOuvrages.length) rows = rows.filter((r) => f.typeOuvrages.includes(r.typeCode));
+    if (f.texte) {
+      const t = f.texte.toLowerCase();
+      rows = rows.filter((r) => r.repere.toLowerCase().includes(t) || r.local.toLowerCase().includes(t) || r.typeLibelle.toLowerCase().includes(t));
+    }
+    return rows;
+  },
+  async lignesPourOuvrage(_chantierId, ouvrageId) {
+    await wait(50);
+    return DEMO.lignes.filter((l) => l.ouvrageId === ouvrageId).map((l) => {
+      const d = DEMO.declarations.find((x) => x.id === l.declarationId);
+      return {
+        declarationId: l.declarationId, date: d ? d.date : "", auteurNom: (DEMO.users.find((u) => u.id === l.auteurId) || {}).nom_affiche || "—",
+        quantite: l.quantite, operationsFaites: l.operationsFaites, activiteLibelle: l.activiteLibelle,
+        commentaire: l.commentaire, pointsBloquants: l.pointsBloquants, solde: l.solde,
+      };
+    }).sort((a, b) => (a.date < b.date ? 1 : -1));
   },
 };
 
@@ -792,6 +863,87 @@ const DB_SUPABASE = {
     if (error) { console.error(error); return []; }
     return (data || []).map((j) => ({ champ: j.champ, avant: j.ancienne_valeur, apres: j.nouvelle_valeur, auteurNom: (j.auteur && j.auteur.nom_affiche) || "—", faitLe: j.fait_le }));
   },
+
+  /* ----- Phase 5 : consultation de l'avancement ----- */
+  async avancementList(chantierId, filters) {
+    const sb = supa();
+    const f = filters || {};
+
+    const { data: ouvrages, error } = await sb
+      .from("ouvrage")
+      .select("id, repere_fonctionnel, quantite_prevue, statut, type_ouvrage:type_ouvrage_id(id, code, libelle, unite, nature, corps_metier:corps_metier_id(code)), local:local_id(code, zone:zone_id(niveau:niveau_id(code, batiment:batiment_id(code))))")
+      .eq("chantier_id", chantierId);
+    if (error) { console.error(error); return []; }
+
+    const { data: lignesRaw, error: lErr } = await sb
+      .from("ligne_declaration")
+      .select("ouvrage_id, quantite, operations_faites, solde, declaration:declaration_id(date_decl)")
+      .eq("chantier_id", chantierId);
+    if (lErr) { console.error(lErr); return []; }
+
+    const lignesByOuvrage = {};
+    (lignesRaw || []).forEach((l) => {
+      const dateStr = l.declaration && l.declaration.date_decl;
+      if (f.dateDebut && dateStr < f.dateDebut) return;
+      if (f.dateFin && dateStr > f.dateFin) return;
+      (lignesByOuvrage[l.ouvrage_id] = lignesByOuvrage[l.ouvrage_id] || []).push(l);
+    });
+
+    if (!METIERS_CACHE) await DB_SUPABASE.metiersTree(chantierId);
+    const opsCountByType = {};
+    METIERS_CACHE.operation.forEach((o) => { opsCountByType[o.type_ouvrage_id] = (opsCountByType[o.type_ouvrage_id] || 0) + 1; });
+
+    let rows = (ouvrages || []).map((o) => {
+      const t = o.type_ouvrage || {};
+      const cm = t.corps_metier || {};
+      const loc = o.local || {};
+      const niveau = (loc.zone && loc.zone.niveau) || {};
+      const batiment = niveau.batiment || {};
+      const lignes = lignesByOuvrage[o.id] || [];
+      const opsTotal = t.id ? (opsCountByType[t.id] || 0) : 0;
+
+      let quantitePosee = null, operationsFaitesUnion = [];
+      if (t.nature === "quantite") {
+        quantitePosee = lignes.reduce((sum, l) => sum + (Number(l.quantite) || 0), 0);
+      } else {
+        const set = new Set();
+        lignes.forEach((l) => (l.operations_faites || []).forEach((code) => set.add(code)));
+        operationsFaitesUnion = [...set];
+      }
+      const soldeAtteint = lignes.some((l) => l.solde);
+
+      return {
+        ouvrageId: o.id, repere: o.repere_fonctionnel, local: loc.code, batiment: batiment.code || "", niveau: niveau.code || "",
+        corpsMetier: cm.code, typeCode: t.code, typeLibelle: t.libelle, unite: t.unite, nature: t.nature,
+        quantitePrevue: o.quantite_prevue, quantitePosee, operationsFaitesUnion, operationsTotal: opsTotal,
+        soldeAtteint, nbDeclarations: lignes.length, statut: o.statut,
+      };
+    });
+
+    if (f.batiments && f.batiments.length) rows = rows.filter((r) => f.batiments.includes(r.batiment));
+    if (f.niveau) rows = rows.filter((r) => r.niveau === f.niveau);
+    if (f.corpsMetiers && f.corpsMetiers.length) rows = rows.filter((r) => f.corpsMetiers.includes(r.corpsMetier));
+    if (f.typeOuvrages && f.typeOuvrages.length) rows = rows.filter((r) => f.typeOuvrages.includes(r.typeCode));
+    if (f.texte) {
+      const tx = f.texte.toLowerCase();
+      rows = rows.filter((r) => (r.repere || "").toLowerCase().includes(tx) || (r.local || "").toLowerCase().includes(tx) || (r.typeLibelle || "").toLowerCase().includes(tx));
+    }
+    return rows;
+  },
+  async lignesPourOuvrage(chantierId, ouvrageId) {
+    const { data, error } = await supa()
+      .from("ligne_declaration")
+      .select("declaration_id, quantite, operations_faites, commentaire, points_bloquants, solde, activite:activite_id(libelle), declaration:declaration_id(date_decl), auteur:auteur_id(nom_affiche)")
+      .eq("chantier_id", chantierId).eq("ouvrage_id", ouvrageId);
+    if (error) { console.error(error); return []; }
+    return (data || [])
+      .map((l) => ({
+        declarationId: l.declaration_id, date: l.declaration && l.declaration.date_decl, auteurNom: (l.auteur && l.auteur.nom_affiche) || "—",
+        quantite: l.quantite, operationsFaites: l.operations_faites, activiteLibelle: l.activite && l.activite.libelle,
+        commentaire: l.commentaire, pointsBloquants: l.points_bloquants, solde: l.solde,
+      }))
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+  },
 };
 
 /* Sélection de l'implémentation — même interface, seule la source de
@@ -851,6 +1003,7 @@ async function route() {
   if (hash.startsWith("/referentiels/ouvrages")) return renderOuvrages(s);
   if (hash.startsWith("/referentiels")) return renderReferentiels(s);
   if (hash.startsWith("/saisie")) return renderSaisie(s);
+  if (hash.startsWith("/avancement")) return renderAvancement(s);
   return renderAccueil(s);
 }
 window.addEventListener("hashchange", route);
@@ -942,6 +1095,7 @@ function shell(s, activeKey, title, bodyHTML) {
   const nav = [
     ["accueil", "Accueil", "#/"],
     PEUT_SAISIR(s.role) ? ["saisie", "Saisie", "#/saisie"] : null,
+    ["avancement", "Avancement", "#/avancement"],
     gere ? ["referentiels", "Référentiels", "#/referentiels"] : null,
     gere ? ["comptes", "Comptes", "#/comptes"] : null,
   ].filter(Boolean);
@@ -2179,6 +2333,185 @@ async function paintDeclarationDetail(s, declarationId) {
     toast("Corrections enregistrées.");
     paintDeclarationDetail(s, declarationId);
   };
+}
+
+/* ===== PHASE 5 — consultation de l'avancement ===== */
+
+function avancementPct(r) {
+  if (r.soldeAtteint) return 100;
+  if (r.nature === "quantite") return r.quantitePrevue > 0 ? Math.round((r.quantitePosee / r.quantitePrevue) * 100) : null;
+  return r.operationsTotal > 0 ? Math.round((r.operationsFaitesUnion.length / r.operationsTotal) * 100) : null;
+}
+function avancementStatut(r) {
+  if (r.statut === "a_rattacher") return "a_rattacher";
+  if (r.nbDeclarations === 0) return "non_commence";
+  const pct = avancementPct(r);
+  if (r.soldeAtteint || (pct != null && pct >= 100)) return "solde";
+  return "en_cours";
+}
+function poseDisplay(r) {
+  if (r.nature === "quantite") return `${r.quantitePosee != null ? r.quantitePosee : 0} ${r.unite || ""}`.trim();
+  const fait = r.soldeAtteint ? r.operationsTotal : r.operationsFaitesUnion.length;
+  return `${fait}/${r.operationsTotal} opération${r.operationsTotal > 1 ? "s" : ""}`;
+}
+function restantDisplay(r) {
+  if (r.nature === "quantite") return r.quantitePrevue != null ? `${Math.max(r.quantitePrevue - (r.quantitePosee || 0), 0)} ${r.unite || ""}`.trim() : "—";
+  if (!r.operationsTotal) return "—";
+  const fait = r.soldeAtteint ? r.operationsTotal : r.operationsFaitesUnion.length;
+  const restant = Math.max(r.operationsTotal - fait, 0);
+  return `${restant} opération${restant > 1 ? "s" : ""}`;
+}
+
+/* ---------------------------------------------------------------------
+   Écran — Avancement (consultation)
+   --------------------------------------------------------------------- */
+async function renderAvancement(s) {
+  shell(s, "avancement", "Avancement", '<div class="card"><div class="muted">Chargement…</div></div>');
+  const geoTree = await DB.geoTree(s.chantier.id);
+  const metiersTree = await DB.metiersTree(s.chantier.id);
+  const batiments = trierBatiments(geoTree.map((b) => b.code));
+
+  $(".content").innerHTML = `
+    <h2>Avancement</h2>
+    <div class="card">
+      <div class="row" style="gap:16px;flex-wrap:wrap;align-items:flex-start">
+        <div class="field" style="margin:0"><label>Bâtiment</label><select class="inp" id="av-batiment" multiple size="4" style="min-width:100px">${batiments.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></div>
+        <div class="field" style="margin:0"><label>Niveau</label><select class="inp" id="av-niveau" style="min-width:100px"><option value="">Tous</option></select></div>
+        <div class="field" style="margin:0"><label>Corps de métier</label><select class="inp" id="av-metier" multiple size="4" style="min-width:170px">${metiersTree.map((cm) => `<option value="${esc(cm.code)}">${esc(cm.code)}</option>`).join("")}</select></div>
+        <div class="field" style="margin:0"><label>Type d'ouvrage</label><select class="inp" id="av-type" multiple size="4" style="min-width:170px"></select></div>
+        <div class="field" style="margin:0"><label>Recherche</label><input class="inp" id="av-texte" placeholder="repère, local, type…" style="min-width:170px"></div>
+        <div class="field" style="margin:0"><label>Du</label><input class="inp" id="av-date-debut" type="date" style="width:150px"></div>
+        <div class="field" style="margin:0"><label>Au</label><input class="inp" id="av-date-fin" type="date" style="width:150px"></div>
+        <div class="field" style="margin:0"><label>&nbsp;</label><button class="btn secondary" id="av-reset" type="button">Réinitialiser</button></div>
+      </div>
+      <div class="hint">Bâtiment et corps de métier : sélection multiple (Cmd/Ctrl-clic). Les filtres se combinent ; « Du/Au » filtre les déclarations prises en compte dans le posé.</div>
+    </div>
+
+    <div class="kpis" id="av-kpis" style="margin-top:16px"></div>
+    <div class="card" style="margin-top:16px">
+      <div id="av-table"><div class="hint">Chargement…</div></div>
+      <div id="av-detail" style="margin-top:14px"></div>
+    </div>
+  `;
+
+  function currentFilters() {
+    return {
+      batiments: [...document.querySelectorAll("#av-batiment option:checked")].map((o) => o.value),
+      corpsMetiers: [...document.querySelectorAll("#av-metier option:checked")].map((o) => o.value),
+      typeOuvrages: [...document.querySelectorAll("#av-type option:checked")].map((o) => o.value),
+      niveau: $("#av-niveau").value || null,
+      texte: $("#av-texte").value.trim(),
+      dateDebut: $("#av-date-debut").value || null,
+      dateFin: $("#av-date-fin").value || null,
+    };
+  }
+
+  function refreshNiveauOptions() {
+    const chosen = [...document.querySelectorAll("#av-batiment option:checked")].map((o) => o.value);
+    const niv = $("#av-niveau");
+    const prev = niv.value;
+    const set = new Set();
+    geoTree.forEach((b) => { if (!chosen.length || chosen.includes(b.code)) b.niveaux.forEach((n) => set.add(n.code)); });
+    niv.innerHTML = `<option value="">Tous</option>` + trierNiveaux([...set]).map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+    if (set.has(prev)) niv.value = prev;
+  }
+  function refreshTypeOptions() {
+    const chosen = [...document.querySelectorAll("#av-metier option:checked")].map((o) => o.value);
+    const typeSel = $("#av-type");
+    const opts = [];
+    metiersTree.forEach((cm) => { if (!chosen.length || chosen.includes(cm.code)) cm.types.forEach((t) => opts.push({ v: t.code, label: cm.code + " / " + t.libelle })); });
+    typeSel.innerHTML = opts.map((o) => `<option value="${esc(o.v)}">${esc(o.label)}</option>`).join("");
+  }
+  refreshNiveauOptions();
+  refreshTypeOptions();
+
+  const refresh = () => refreshAvancementTable(s, currentFilters());
+  $("#av-batiment").onchange = () => { refreshNiveauOptions(); refresh(); };
+  $("#av-niveau").onchange = refresh;
+  $("#av-metier").onchange = () => { refreshTypeOptions(); refresh(); };
+  $("#av-type").onchange = refresh;
+  $("#av-texte").oninput = refresh;
+  $("#av-date-debut").onchange = refresh;
+  $("#av-date-fin").onchange = refresh;
+  $("#av-reset").onclick = () => {
+    document.querySelectorAll("#av-batiment option, #av-metier option, #av-type option").forEach((o) => (o.selected = false));
+    $("#av-niveau").value = ""; $("#av-texte").value = ""; $("#av-date-debut").value = ""; $("#av-date-fin").value = "";
+    refreshNiveauOptions(); refreshTypeOptions(); refresh();
+  };
+
+  refresh();
+}
+
+async function refreshAvancementTable(s, filters) {
+  const box = $("#av-table");
+  box.innerHTML = `<div class="hint">Chargement…</div>`;
+  const rows = await DB.avancementList(s.chantier.id, filters);
+
+  const c = { solde: 0, en_cours: 0, non_commence: 0, a_rattacher: 0 };
+  rows.forEach((r) => c[avancementStatut(r)]++);
+  $("#av-kpis").innerHTML = `
+    <div class="kpi"><div class="k">Ouvrages</div><div class="v">${rows.length}</div></div>
+    <div class="kpi"><div class="k">Soldés</div><div class="v">${c.solde}</div></div>
+    <div class="kpi"><div class="k">En cours</div><div class="v">${c.en_cours}</div></div>
+    <div class="kpi"><div class="k">Non commencés</div><div class="v">${c.non_commence}</div></div>
+    ${c.a_rattacher ? `<div class="kpi flag"><div class="k">À rattacher</div><div class="v">${c.a_rattacher}</div></div>` : ""}
+  `;
+
+  if (!rows.length) {
+    box.innerHTML = `<div class="hint" style="padding:16px 0">Aucun ouvrage pour ce filtre.</div>`;
+    $("#av-detail").innerHTML = "";
+    return;
+  }
+
+  box.innerHTML = `
+    <table class="grid">
+      <thead><tr><th>Repère</th><th>Local</th><th>Type d'ouvrage</th><th>Corps de métier</th><th>Prévu</th><th>Posé</th><th>Restant</th><th>Avancement</th><th>Statut</th><th></th></tr></thead>
+      <tbody>${rows.map((r) => {
+        const pct = avancementPct(r);
+        const statut = avancementStatut(r);
+        const bdg = { solde: '<span class="bdg ok">Soldé</span>', en_cours: '<span class="bdg run">En cours</span>', non_commence: '<span class="bdg none">Non commencé</span>', a_rattacher: '<span class="bdg flag">À rattacher</span>' }[statut];
+        return `<tr>
+          <td class="rf">${esc(r.repere)}</td>
+          <td class="mono">${esc(r.local)}</td>
+          <td>${esc(r.typeLibelle || "")}</td>
+          <td>${esc(r.corpsMetier || "")}</td>
+          <td>${r.quantitePrevue != null ? r.quantitePrevue + " " + esc(r.unite || "") : "—"}</td>
+          <td>${esc(poseDisplay(r))}</td>
+          <td>${esc(restantDisplay(r))}</td>
+          <td>${pct != null ? `<span class="bar"><i style="width:${Math.min(pct, 100)}%"></i></span>${pct}%` : "—"}</td>
+          <td>${bdg}</td>
+          <td><button class="btn ghost small av-detail-btn" data-id="${r.ouvrageId}" type="button">Détail</button></td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table>
+  `;
+  box.querySelectorAll(".av-detail-btn").forEach((btn) => (btn.onclick = () => paintAvancementDetail(s, btn.dataset.id, rows.find((r) => r.ouvrageId === btn.dataset.id))));
+}
+
+async function paintAvancementDetail(s, ouvrageId, row) {
+  const box = $("#av-detail");
+  box.innerHTML = `<div class="hint">Chargement…</div>`;
+  const lignes = await DB.lignesPourOuvrage(s.chantier.id, ouvrageId);
+  box.innerHTML = `
+    <div class="card">
+      <div class="spread"><h3 style="margin:0">Déclarations sources — ${esc(row.repere)}</h3><button class="btn ghost small" id="av-detail-close" type="button">Fermer</button></div>
+      ${lignes.length ? `
+      <table class="grid" style="margin-top:8px">
+        <thead><tr><th>Date</th><th>Activité</th><th>Valeur</th><th>Commentaire</th><th>Points bloquants</th><th>Soldé</th><th>Saisi par</th></tr></thead>
+        <tbody>${lignes.map((l) => `
+          <tr>
+            <td class="mono">${esc(l.date)}</td>
+            <td>${esc(l.activiteLibelle || "—")}</td>
+            <td>${l.quantite != null ? l.quantite + " " + esc(row.unite || "") : ((l.operationsFaites || []).join(", ") || "—")}</td>
+            <td>${esc(l.commentaire || "—")}</td>
+            <td>${esc(l.pointsBloquants || "—")}</td>
+            <td>${l.solde ? '<span class="bdg ok">Oui</span>' : '<span class="bdg none">Non</span>'}</td>
+            <td>${esc(l.auteurNom)}</td>
+          </tr>`).join("")}</tbody>
+      </table>` : `<div class="hint" style="margin-top:8px">Aucune déclaration pour cet ouvrage.</div>`}
+    </div>
+  `;
+  $("#av-detail-close").onclick = () => { box.innerHTML = ""; };
 }
 
 </script>
