@@ -136,7 +136,7 @@ table.grid label:has(input[type="checkbox"]){display:flex!important;align-items:
    Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
    ===================================================================== */
 
-const APP_VERSION = "0.6.1";
+const APP_VERSION = "0.6.2";
 
 /* ---------------------------------------------------------------------
    Configuration du déploiement (principe PRD n°12 — neutralité).
@@ -1851,6 +1851,26 @@ async function paintOuvragesBrowse(s) {
 
 let SAISIE_TYPES = [];
 let SAISIE_REPERES_INDEX = [];
+
+// Ordre d'affichage des bâtiments dans la saisie (demande terrain, pas
+// alphabétique). Un code absent de cette liste se range après, par ordre
+// alphabétique.
+const ORDRE_BATIMENTS = ["BUA", "BUR", "BASA", "BASB", "BMR", "BAV", "BMN"];
+function trierBatiments(codes) {
+  return [...codes].sort((a, b) => {
+    const ia = ORDRE_BATIMENTS.indexOf(a), ib = ORDRE_BATIMENTS.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+}
+// Tri vertical des niveaux (+3 en haut, -3 en bas) à partir du suffixe
+// signé du code (ex. "UA+2" -> 2, "UA-1" -> -1).
+function trierNiveaux(codes) {
+  const val = (c) => { const m = String(c).match(/([+-]\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; };
+  return [...codes].sort((a, b) => val(b) - val(a));
+}
 let SAISIE_ROW_SEQ = 0;
 
 function saisieValeurCell(type) {
@@ -1983,7 +2003,7 @@ async function renderSaisie(s) {
         <div class="field" style="margin:0"><label>Date</label><input class="inp" id="sa-date" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
         <div class="field" style="margin:0"><label>Équipe</label><input class="inp" id="sa-equipe" placeholder="Noms de l'équipe" style="min-width:220px"></div>
         <div class="field" style="margin:0"><label>Corps de métier</label><select class="inp" id="sa-metier"><option value="">— choisir —</option>${tree.map((cm) => `<option value="${esc(cm.code)}">${esc(cm.code)}</option>`).join("")}</select></div>
-        <div class="field" style="margin:0"><label>Bâtiment</label><select class="inp" id="sa-batiment" style="min-width:100px"><option value="">— choisir —</option>${geoTree.map((b) => b.code).sort().map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></div>
+        <div class="field" style="margin:0"><label>Bâtiment</label><select class="inp" id="sa-batiment" style="min-width:100px"><option value="">— choisir —</option>${trierBatiments(geoTree.map((b) => b.code)).map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></div>
         <div class="field" style="margin:0"><label>Niveau</label><select class="inp" id="sa-niveau" style="min-width:100px" disabled><option value="">—</option></select></div>
         <div class="field" style="margin:0"><label>Local</label><select class="inp" id="sa-local" style="min-width:140px" disabled><option value="">—</option></select></div>
       </div>
@@ -2021,7 +2041,7 @@ async function renderSaisie(s) {
     $("#sa-batiment").onchange = () => {
       const b = geoTree.find((x) => x.code === $("#sa-batiment").value);
       const nivSel = $("#sa-niveau"), locSel = $("#sa-local");
-      nivSel.innerHTML = `<option value="">— choisir —</option>` + (b ? b.niveaux.map((n) => `<option value="${esc(n.code)}">${esc(n.code)}</option>`).join("") : "");
+      nivSel.innerHTML = `<option value="">— choisir —</option>` + (b ? trierNiveaux(b.niveaux.map((n) => n.code)).map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("") : "");
       nivSel.disabled = !b;
       locSel.innerHTML = `<option value="">—</option>`;
       locSel.disabled = true;
