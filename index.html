@@ -147,7 +147,7 @@ table.grid label:has(input[type="checkbox"]){display:flex!important;align-items:
    Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
    ===================================================================== */
 
-const APP_VERSION = "0.8.0";
+const APP_VERSION = "0.8.1";
 
 /* ---------------------------------------------------------------------
    Configuration du déploiement (principe PRD n°12 — neutralité).
@@ -2187,8 +2187,11 @@ async function renderSaisie(s) {
 
     <div class="card" style="margin-top:20px">
       <h3 style="margin-bottom:10px">Importer un template Excel (plusieurs jours)</h3>
-      <p class="hint" style="margin-top:0">Colonnes : Date (AAAA-MM-JJ) · Équipe · Corps de métier · Local · Type d'ouvrage · Repère fonctionnel · Activité · Valeur · Commentaire · Points bloquants · Soldé (oui/non). Une déclaration est créée par combinaison date + équipe + corps de métier + local.</p>
+      <p class="hint" style="margin-top:0">Colonnes : Date (AAAA-MM-JJ) · Équipe · Corps de métier · Local · Type d'ouvrage · Repère fonctionnel · Activité · Valeur · Commentaire · Points bloquants · Soldé (oui/non). Une déclaration est créée par combinaison date + équipe + corps de métier + local. <b>L'en-tête ne doit pas être modifié.</b></p>
       <div class="row">
+        <button class="btn secondary small" id="imp-av-modele" type="button">Télécharger le modèle (.csv)</button>
+      </div>
+      <div class="row" style="margin-top:10px">
         <input type="file" id="imp-av-file" accept=".csv,text/csv,text/plain" class="inp" style="max-width:280px">
       </div>
       <div class="field" style="margin-top:12px">
@@ -2243,6 +2246,7 @@ async function renderSaisie(s) {
       $("#sa-paste").value = "";
     };
 
+    $("#imp-av-modele").onclick = () => downloadModeleAvancement(tree, SAISIE_REPERES_INDEX);
     $("#imp-av-file").onchange = (e) => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { $("#imp-av-paste").value = rd.result; toast("Fichier lu — cliquez « Prévisualiser »."); }; rd.readAsText(f, "utf-8"); };
     $("#imp-av-analyse").onclick = async () => {
       const txt = $("#imp-av-paste").value.trim();
@@ -2611,13 +2615,28 @@ function appendPastedRows(text) {
    Une déclaration par combinaison (date, équipe, corps de métier, local) ;
    mêmes contrôles que la saisie manuelle, plus un doublon "date + repère +
    activité" propre à ce mode (deux lignes identiques dans un même import). */
+const COLONNES_AVANCEMENT = ["Date", "Équipe", "Corps de métier", "Local", "Type d'ouvrage", "Repère fonctionnel", "Activité", "Valeur", "Commentaire", "Points bloquants", "Soldé"];
+
 function analyseAvancementCsv(text, metiersTree, ouvrageIndex) {
   const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim() !== "");
   if (!lines.length) return { erreurGlobale: "Fichier vide." };
   const head = lines[0];
   const sep = head.includes("\t") ? "\t" : ((head.match(/;/g) || []).length >= (head.match(/,/g) || []).length ? ";" : ",");
+  const headCols = head.split(sep).map((c) => c.trim());
   const isHeader = /date/i.test(head) && /rep[eè]re/i.test(head);
-  const body = isHeader ? lines.slice(1) : lines;
+
+  // Contrôle de structure : bloquant, avant toute lecture des lignes. Un
+  // fichier dont les colonnes ne correspondent pas au modèle produirait
+  // sinon des données décalées (ex. la quantité lue comme un commentaire)
+  // sans que personne ne s'en aperçoive.
+  if (!isHeader) {
+    return { erreurGlobale: `La première ligne du fichier ne correspond pas à l'en-tête attendu. Colonnes attendues, dans l'ordre : ${COLONNES_AVANCEMENT.join(" · ")}. Téléchargez le modèle ci-dessus et complétez-le sans changer l'en-tête.` };
+  }
+  if (headCols.length < COLONNES_AVANCEMENT.length) {
+    return { erreurGlobale: `Le fichier a ${headCols.length} colonne${headCols.length > 1 ? "s" : ""} au lieu des ${COLONNES_AVANCEMENT.length} attendues (${COLONNES_AVANCEMENT.join(" · ")}). Une colonne manque ou l'export s'est mal fait — utilisez le modèle téléchargeable ci-dessus.` };
+  }
+
+  const body = lines.slice(1);
 
   const typeIndex = new Map();
   metiersTree.forEach((cm) => cm.types.forEach((t) => {
@@ -2750,6 +2769,49 @@ async function avancementImportCommit(chantierId, kept, auteurId) {
     declarations++; lignes += g.lignes.length;
   }
   return { ok: true, declarations, lignes };
+}
+
+/* Déclenche le téléchargement d'un fichier texte dans le navigateur —
+   pour un .csv, Excel l'ouvre nativement au double-clic. */
+function downloadCsv(filename, content) {
+  const blob = new Blob(["﻿" + content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/* Modèle du template d'import d'avancement : en-tête + 2 lignes d'exemple
+   tirées des vrais ouvrages du chantier quand c'est possible, une par
+   nature (quantité, opérations), pour montrer le format attendu. */
+function downloadModeleAvancement(metiersTree, ouvrageIndex) {
+  const today = new Date().toISOString().slice(0, 10);
+  const exemples = [];
+  const exQuantite = (ouvrageIndex || []).find((o) => {
+    const t = metiersTree.flatMap((cm) => cm.types.map((tt) => ({ ...tt, corps: cm.code }))).find((x) => x.corps === o.corpsMetier && x.code === o.typeCode);
+    return t && t.nature === "quantite";
+  });
+  const exOperations = (ouvrageIndex || []).find((o) => {
+    const t = metiersTree.flatMap((cm) => cm.types.map((tt) => ({ ...tt, corps: cm.code }))).find((x) => x.corps === o.corpsMetier && x.code === o.typeCode);
+    return t && t.nature === "operations";
+  });
+  if (exQuantite) {
+    const t = metiersTree.find((cm) => cm.code === exQuantite.corpsMetier).types.find((tt) => tt.code === exQuantite.typeCode);
+    const a = t.activites[0];
+    exemples.push([today, "Andrei Ciobanu, Gilberto Pereira", exQuantite.corpsMetier, exQuantite.local, t.libelle, exQuantite.repere, a ? a.libelle : "", "3000", "RAS", "", "non"]);
+  }
+  if (exOperations) {
+    const t = metiersTree.find((cm) => cm.code === exOperations.corpsMetier).types.find((tt) => tt.code === exOperations.typeCode);
+    const a = t.activites[0];
+    const op = t.operations[0];
+    exemples.push([today, "Andrei Ciobanu", exOperations.corpsMetier, exOperations.local, t.libelle, exOperations.repere, a ? a.libelle : "", op ? op.libelle : "", "", "échafaudage manquant", "non"]);
+  }
+  if (!exemples.length) exemples.push([today, "Nom Prénom", "Gaines de ventilation", "UA+1S12", "Gaine de ventilation", "GV-BUA-UA1-S12-014", "Pose", "3000", "", "", "non"]);
+
+  const lignes = [COLONNES_AVANCEMENT.join(";"), ...exemples.map((r) => r.join(";"))];
+  downloadCsv("modele_import_avancement.csv", lignes.join("\n"));
+  toast("Modèle téléchargé — remplacez les lignes d'exemple par vos données, sans toucher à l'en-tête.");
 }
 
 </script>
