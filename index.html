@@ -147,7 +147,7 @@ table.grid label:has(input[type="checkbox"]){display:flex!important;align-items:
    Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
    ===================================================================== */
 
-const APP_VERSION = "0.7.0";
+const APP_VERSION = "0.7.1";
 
 /* ---------------------------------------------------------------------
    Configuration du déploiement (principe PRD n°12 — neutralité).
@@ -2445,6 +2445,7 @@ async function renderAvancement(s) {
 async function refreshAvancementTable(s, filters) {
   const box = $("#av-table");
   box.innerHTML = `<div class="hint">Chargement…</div>`;
+  $("#av-detail").innerHTML = ""; // referme le détail d'une ligne : il ne correspondrait plus au filtre courant
   const rows = await DB.avancementList(s.chantier.id, filters);
 
   const c = { solde: 0, en_cours: 0, non_commence: 0, a_rattacher: 0 };
