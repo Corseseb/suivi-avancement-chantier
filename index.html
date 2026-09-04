@@ -136,7 +136,7 @@ table.grid label:has(input[type="checkbox"]){display:flex!important;align-items:
    Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
    ===================================================================== */
 
-const APP_VERSION = "0.6.0";
+const APP_VERSION = "0.6.1";
 
 /* ---------------------------------------------------------------------
    Configuration du déploiement (principe PRD n°12 — neutralité).
@@ -1973,8 +1973,6 @@ async function renderSaisie(s) {
   shell(s, "saisie", "Saisie", '<div class="card"><div class="muted">Chargement…</div></div>');
   const tree = await DB.metiersTree(s.chantier.id);
   const geoTree = await DB.geoTree(s.chantier.id);
-  const locaux = [];
-  geoTree.forEach((b) => b.niveaux.forEach((n) => n.zones.forEach((z) => z.locaux.forEach((l) => locaux.push(l.code)))));
   SAISIE_REPERES_INDEX = await DB.ouvrageIndex(s.chantier.id);
 
   $(".content").innerHTML = `
@@ -1985,7 +1983,9 @@ async function renderSaisie(s) {
         <div class="field" style="margin:0"><label>Date</label><input class="inp" id="sa-date" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
         <div class="field" style="margin:0"><label>Équipe</label><input class="inp" id="sa-equipe" placeholder="Noms de l'équipe" style="min-width:220px"></div>
         <div class="field" style="margin:0"><label>Corps de métier</label><select class="inp" id="sa-metier"><option value="">— choisir —</option>${tree.map((cm) => `<option value="${esc(cm.code)}">${esc(cm.code)}</option>`).join("")}</select></div>
-        <div class="field" style="margin:0"><label>Local</label><select class="inp" id="sa-local" style="min-width:160px"><option value="">— choisir —</option>${[...new Set(locaux)].sort().map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></div>
+        <div class="field" style="margin:0"><label>Bâtiment</label><select class="inp" id="sa-batiment" style="min-width:100px"><option value="">— choisir —</option>${geoTree.map((b) => b.code).sort().map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></div>
+        <div class="field" style="margin:0"><label>Niveau</label><select class="inp" id="sa-niveau" style="min-width:100px" disabled><option value="">—</option></select></div>
+        <div class="field" style="margin:0"><label>Local</label><select class="inp" id="sa-local" style="min-width:140px" disabled><option value="">—</option></select></div>
       </div>
 
       <div id="sa-grid-wrap" style="margin-top:16px;display:none">
@@ -2017,6 +2017,24 @@ async function renderSaisie(s) {
       $("#sa-tbody").innerHTML = "";
       $("#sa-grid-wrap").style.display = SAISIE_TYPES.length ? "" : "none";
       if (SAISIE_TYPES.length) addSaisieRow();
+    };
+    $("#sa-batiment").onchange = () => {
+      const b = geoTree.find((x) => x.code === $("#sa-batiment").value);
+      const nivSel = $("#sa-niveau"), locSel = $("#sa-local");
+      nivSel.innerHTML = `<option value="">— choisir —</option>` + (b ? b.niveaux.map((n) => `<option value="${esc(n.code)}">${esc(n.code)}</option>`).join("") : "");
+      nivSel.disabled = !b;
+      locSel.innerHTML = `<option value="">—</option>`;
+      locSel.disabled = true;
+      refreshAllRepereOptions();
+    };
+    $("#sa-niveau").onchange = () => {
+      const b = geoTree.find((x) => x.code === $("#sa-batiment").value);
+      const n = b && b.niveaux.find((x) => x.code === $("#sa-niveau").value);
+      const locSel = $("#sa-local");
+      const locauxIci = n ? n.zones.flatMap((z) => z.locaux) : [];
+      locSel.innerHTML = `<option value="">— choisir —</option>` + locauxIci.map((l) => `<option value="${esc(l.code)}">${esc(l.code)}</option>`).join("");
+      locSel.disabled = !locauxIci.length;
+      refreshAllRepereOptions();
     };
     $("#sa-local").onchange = refreshAllRepereOptions;
     $("#sa-add").onclick = () => addSaisieRow();
