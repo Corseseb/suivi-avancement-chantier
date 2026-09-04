@@ -134,7 +134,7 @@ table.grid tbody tr:hover{background:var(--panel-2)}
    Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
    ===================================================================== */
 
-const APP_VERSION = "0.3.1";
+const APP_VERSION = "0.4.0";
 
 /* ---------------------------------------------------------------------
    Configuration du déploiement (principe PRD n°12 — neutralité).
@@ -177,6 +177,9 @@ const DEMO = {
   password: "demo", // mot de passe unique en mode démo
   // Référentiel géographique — vide au départ, alimenté par import (Phase 2)
   geo: { batiments: [], niveaux: [], zones: [], locaux: [] },
+  // Référentiel métiers / ouvrages — vide au départ, alimenté par import (Phase 3)
+  metiers: { corpsMetier: [], typeOuvrage: [], activite: [], operation: [] },
+  ouvrages: [],
 };
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -266,6 +269,63 @@ const DB_DEMO = {
     }
     DEMO.geo = g;
     return { ok: true, stats: { batiments: g.batiments.length, niveaux: g.niveaux.length, zones: g.zones.length, locaux: g.locaux.length } };
+  },
+
+  /* ----- Phase 3 : référentiel ouvrages, métiers, activités ----- */
+  async metiersSummary(_chantierId) {
+    await wait(50);
+    const m = DEMO.metiers;
+    return { corpsMetier: m.corpsMetier.length, typeOuvrage: m.typeOuvrage.length, activites: m.activite.length, operations: m.operation.length };
+  },
+  async metiersTree(_chantierId) {
+    await wait(50);
+    const m = DEMO.metiers;
+    return m.corpsMetier.map((cm) => ({
+      code: cm.code, libelle: cm.libelle,
+      types: m.typeOuvrage.filter((t) => t.corps === cm.code).map((t) => ({
+        code: t.code, libelle: t.libelle, unite: t.unite, nature: t.nature,
+        activites: m.activite.filter((a) => a.corps === cm.code && a.type === t.code),
+        operations: m.operation.filter((o) => o.corps === cm.code && o.type === t.code),
+      })),
+    }));
+  },
+  async metiersImportCommit(_chantierId, kept) {
+    await wait(150);
+    const m = { corpsMetier: [...DEMO.metiers.corpsMetier], typeOuvrage: [...DEMO.metiers.typeOuvrage], activite: [...DEMO.metiers.activite], operation: [...DEMO.metiers.operation] };
+    const seenCM = new Set(m.corpsMetier.map((c) => c.code));
+    const seenT = new Set(m.typeOuvrage.map((t) => t.corps + "|" + t.code));
+    for (const r of kept) {
+      if (!seenCM.has(r.corpsMetier)) { seenCM.add(r.corpsMetier); m.corpsMetier.push({ code: r.corpsMetier, libelle: r.corpsMetier }); }
+      const tk = r.corpsMetier + "|" + r.typeCode;
+      if (!seenT.has(tk)) {
+        seenT.add(tk);
+        m.typeOuvrage.push({ corps: r.corpsMetier, code: r.typeCode, libelle: r.typeLibelle, unite: r.unite, nature: r.nature });
+        r.activites.forEach((a) => m.activite.push({ corps: r.corpsMetier, type: r.typeCode, code: a, libelle: a }));
+        r.operations.forEach((o) => m.operation.push({ corps: r.corpsMetier, type: r.typeCode, code: o, libelle: o }));
+      }
+    }
+    DEMO.metiers = m;
+    return { ok: true, stats: await DB_DEMO.metiersSummary() };
+  },
+  async ouvrageSummary(_chantierId) {
+    await wait(50);
+    return { total: DEMO.ouvrages.length, aRattacher: DEMO.ouvrages.filter((o) => o.statut === "a_rattacher").length };
+  },
+  async ouvrageImportCommit(_chantierId, kept, _auteurId) {
+    await wait(150);
+    const seen = new Set(DEMO.ouvrages.map((o) => o.repere));
+    for (const r of kept) {
+      if (seen.has(r.repere)) continue;
+      seen.add(r.repere);
+      DEMO.ouvrages.push({ repere: r.repere, corpsMetier: r.corpsMetier, typeCode: r.typeCode, typeLibelle: r.typeLibelle, unite: r.unite, nature: r.nature, local: r.local, quantitePrevue: r.quantitePrevue, statut: "actif" });
+    }
+    return { ok: true, stats: await DB_DEMO.ouvrageSummary() };
+  },
+  async ouvrageList(_chantierId, filters) {
+    await wait(60);
+    let rows = DEMO.ouvrages;
+    if (filters && filters.type) rows = rows.filter((o) => o.typeCode === filters.type);
+    return rows.map((o) => ({ ...o, pose: 0, restant: o.quantitePrevue }));
   },
 };
 
@@ -414,6 +474,106 @@ const DB_SUPABASE = {
     GEO_CACHE = null; // invalide le cache de recherche
     return { ok: true, stats: await DB_SUPABASE.geoSummary(chantierId) };
   },
+
+  /* ----- Phase 3 : référentiel ouvrages, métiers, activités ----- */
+  async metiersSummary(chantierId) {
+    const [cm, to, ac, op] = await Promise.all([
+      supa().from("corps_metier").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId),
+      supa().from("type_ouvrage").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId),
+      supa().from("activite").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId),
+      supa().from("operation").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId),
+    ]);
+    return { corpsMetier: cm.count || 0, typeOuvrage: to.count || 0, activites: ac.count || 0, operations: op.count || 0 };
+  },
+  async metiersTree(chantierId) {
+    const [cm, to, ac, op] = await Promise.all([
+      supa().from("corps_metier").select("*").eq("chantier_id", chantierId).order("code"),
+      supa().from("type_ouvrage").select("*").eq("chantier_id", chantierId).order("code"),
+      supa().from("activite").select("*").eq("chantier_id", chantierId).order("code"),
+      supa().from("operation").select("*").eq("chantier_id", chantierId).order("code"),
+    ]);
+    const corpsMetier = cm.data || [], typeOuvrage = to.data || [], activite = ac.data || [], operation = op.data || [];
+    METIERS_CACHE = { corpsMetier, typeOuvrage, activite, operation };
+    return corpsMetier.map((c) => ({
+      code: c.code, libelle: c.libelle,
+      types: typeOuvrage.filter((t) => t.corps_metier_id === c.id).map((t) => ({
+        code: t.code, libelle: t.libelle, unite: t.unite, nature: t.nature,
+        activites: activite.filter((a) => a.type_ouvrage_id === t.id),
+        operations: operation.filter((o) => o.type_ouvrage_id === t.id),
+      })),
+    }));
+  },
+  async metiersImportCommit(chantierId, kept) {
+    const sb = supa();
+    const uniq = (arr) => [...new Set(arr)];
+
+    const cmCodes = uniq(kept.map((r) => r.corpsMetier));
+    await sb.from("corps_metier").upsert(cmCodes.map((code) => ({ chantier_id: chantierId, code, libelle: code })), { onConflict: "chantier_id,code", ignoreDuplicates: true });
+    const { data: allCM } = await sb.from("corps_metier").select("id,code").eq("chantier_id", chantierId);
+    const idCM = Object.fromEntries(allCM.map((c) => [c.code, c.id]));
+
+    const types = kept.map((r) => ({ chantier_id: chantierId, corps_metier_id: idCM[r.corpsMetier], code: r.typeCode, libelle: r.typeLibelle, unite: r.unite || "u", nature: r.nature }));
+    await sb.from("type_ouvrage").upsert(types, { onConflict: "corps_metier_id,code", ignoreDuplicates: true });
+    const { data: allT } = await sb.from("type_ouvrage").select("id,code,corps_metier_id").eq("chantier_id", chantierId);
+    const idT = Object.fromEntries(allT.map((t) => [t.corps_metier_id + "|" + t.code, t.id]));
+
+    const activites = [], operations = [];
+    kept.forEach((r) => {
+      const tid = idT[idCM[r.corpsMetier] + "|" + r.typeCode];
+      r.activites.forEach((a) => activites.push({ chantier_id: chantierId, type_ouvrage_id: tid, code: a, libelle: a }));
+      r.operations.forEach((o) => operations.push({ chantier_id: chantierId, type_ouvrage_id: tid, code: o, libelle: o }));
+    });
+    if (activites.length) await sb.from("activite").upsert(activites, { onConflict: "type_ouvrage_id,code", ignoreDuplicates: true });
+    if (operations.length) await sb.from("operation").upsert(operations, { onConflict: "type_ouvrage_id,code", ignoreDuplicates: true });
+
+    METIERS_CACHE = null;
+    return { ok: true, stats: await DB_SUPABASE.metiersSummary(chantierId) };
+  },
+  async ouvrageSummary(chantierId) {
+    const [tot, ar] = await Promise.all([
+      supa().from("ouvrage").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId),
+      supa().from("ouvrage").select("id", { count: "exact", head: true }).eq("chantier_id", chantierId).eq("statut", "a_rattacher"),
+    ]);
+    return { total: tot.count || 0, aRattacher: ar.count || 0 };
+  },
+  async ouvrageImportCommit(chantierId, kept, auteurId) {
+    const sb = supa();
+    if (!METIERS_CACHE) await DB_SUPABASE.metiersTree(chantierId);
+    const idCM = Object.fromEntries(METIERS_CACHE.corpsMetier.map((c) => [c.code, c.id]));
+    const idT = Object.fromEntries(METIERS_CACHE.typeOuvrage.map((t) => [t.corps_metier_id + "|" + t.code, t.id]));
+    const { data: allLoc } = await sb.from("local").select("id,code").eq("chantier_id", chantierId);
+    const idL = Object.fromEntries((allLoc || []).map((l) => [l.code, l.id]));
+
+    const rows = kept.map((r) => ({
+      chantier_id: chantierId,
+      repere_fonctionnel: r.repere,
+      local_id: idL[r.local],
+      type_ouvrage_id: idT[idCM[r.corpsMetier] + "|" + r.typeCode],
+      quantite_prevue: r.quantitePrevue,
+      statut: "actif",
+    }));
+    await sb.from("ouvrage").upsert(rows, { onConflict: "chantier_id,repere_fonctionnel", ignoreDuplicates: true });
+    await sb.from("import_lot").insert({ chantier_id: chantierId, type: "ouvrages", statut: "valide", lignes_retenues: kept.length, auteur_id: auteurId, valide_le: new Date().toISOString() });
+
+    return { ok: true, stats: await DB_SUPABASE.ouvrageSummary(chantierId) };
+  },
+  async ouvrageList(chantierId, filters) {
+    const { data, error } = await supa()
+      .from("ouvrage")
+      .select("repere_fonctionnel, quantite_prevue, statut, type_ouvrage:type_ouvrage_id(code,libelle,unite,nature,corps_metier:corps_metier_id(code)), local:local_id(code)")
+      .eq("chantier_id", chantierId);
+    if (error) { console.error(error); return []; }
+    let rows = (data || []).map((o) => ({
+      repere: o.repere_fonctionnel, quantitePrevue: o.quantite_prevue, statut: o.statut,
+      typeCode: o.type_ouvrage && o.type_ouvrage.code, typeLibelle: o.type_ouvrage && o.type_ouvrage.libelle,
+      unite: o.type_ouvrage && o.type_ouvrage.unite, nature: o.type_ouvrage && o.type_ouvrage.nature,
+      corpsMetier: o.type_ouvrage && o.type_ouvrage.corps_metier && o.type_ouvrage.corps_metier.code,
+      local: o.local && o.local.code,
+      pose: 0, restant: o.quantite_prevue,
+    }));
+    if (filters && filters.type) rows = rows.filter((r) => r.typeCode === filters.type);
+    return rows;
+  },
 };
 
 /* Sélection de l'implémentation — même interface, seule la source de
@@ -469,6 +629,7 @@ async function route() {
 
   if (hash.startsWith("/comptes")) return renderComptes(s);
   if (hash.startsWith("/referentiels/geo")) return renderGeo(s);
+  if (hash.startsWith("/referentiels/ouvrages")) return renderOuvrages(s);
   if (hash.startsWith("/referentiels")) return renderReferentiels(s);
   return renderAccueil(s);
 }
@@ -922,19 +1083,20 @@ function analyseGeoCsv(text) {
 async function renderReferentiels(s) {
   if (!PEUT_GERER_COMPTES(s.role)) { go("/"); return route(); }
   shell(s, "referentiels", "Référentiels", '<div class="card"><div class="muted">Chargement…</div></div>');
-  const g = await DB.geoSummary(s.chantier.id);
+  const [g, ms, os] = await Promise.all([DB.geoSummary(s.chantier.id), DB.metiersSummary(s.chantier.id), DB.ouvrageSummary(s.chantier.id)]);
   $(".content").innerHTML = `
     <h2>Référentiels du chantier</h2>
-    <p class="muted">Les données d'entrée alimentées par l'ingénieur DATA. Le reste (ouvrages, activités) arrive à la phase 3.</p>
+    <p class="muted">Les données d'entrée alimentées par l'ingénieur DATA.</p>
     <div class="pick" style="max-width:640px;margin-top:14px">
       <button onclick="location.hash='#/referentiels/geo'">
         <span><span class="code">Référentiel géographique</span><br>
         <span class="lib">${g.locaux ? `${g.batiments} bâtiments · ${g.niveaux} niveaux · ${g.zones} zones · ${g.locaux} locaux` : "non chargé — à importer"}</span></span>
         <span class="role">${g.locaux ? "chargé" : "vide"}</span>
       </button>
-      <button disabled style="opacity:.55;cursor:default">
-        <span><span class="code">Ouvrages, métiers, activités</span><br><span class="lib">Phase 3</span></span>
-        <span class="role">à venir</span>
+      <button onclick="location.hash='#/referentiels/ouvrages'">
+        <span><span class="code">Ouvrages, métiers, activités</span><br>
+        <span class="lib">${ms.typeOuvrage ? `${ms.corpsMetier} corps de métier · ${ms.typeOuvrage} types d'ouvrage · ${os.total} ouvrages` : "non chargé — à importer"}</span></span>
+        <span class="role">${ms.typeOuvrage ? "chargé" : "vide"}</span>
       </button>
     </div>`;
 }
@@ -1081,6 +1243,387 @@ async function paintGeoBrowse() {
       ? `<table class="grid" style="margin:8px 0"><thead><tr><th>Local</th><th>Zone SEVA</th><th>Zone interne</th><th>Niveau</th><th>Bâtiment</th></tr></thead><tbody>${res.map((l) => `<tr><td class="mono">${esc(l.code)}</td><td class="mono">${esc(l.zone_cea)}</td><td class="mono">${esc(l.zone_int || "—")}</td><td class="mono">${esc(l.niveau)}</td><td class="mono">${esc(l.batiment)}</td></tr>`).join("")}</tbody></table>`
       : `<div class="hint" style="margin:8px 0">Aucun local ne correspond.</div>`;
   };
+}
+
+/* ===== PHASE 3 — référentiel ouvrages, métiers, activités ===== */
+
+/* Jeux de démonstration : configuration pilote (gaines de ventilation +
+   supports de gaine) et un lot d'ouvrages sur des locaux réels du
+   référentiel géo RJH, avec 3 anomalies volontaires (doublon de repère,
+   local inconnu, quantité prévue manquante) pour éprouver la
+   prévisualisation d'import. */
+const METIERS_DEMO_CSV = `Corps de métier;Type d'ouvrage;Libellé;Unité;Nature;Activités;Opérations
+Gaines de ventilation;GAINE;Gaine de ventilation;mm;quantite;Pose;
+Gaines de ventilation;SUPPORT_GAINE;Support de gaine;u;operations;Pose support;Perçage/Chevillage|Montage`;
+const OUVRAGES_DEMO_CSV = `Repère fonctionnel;Corps de métier;Type d'ouvrage;Local;Quantité prévue
+GV-BUA-UA1-S12-014;Gaines de ventilation;GAINE;UA+1S12;42000
+GV-BUA-UA1-S12-015;Gaines de ventilation;GAINE;UA+1S12;18500
+GV-BUA-UA1-S15-021;Gaines de ventilation;GAINE;UA+1S15;27000
+GV-BUA-UA1-S15-022;Gaines de ventilation;GAINE;UA+1S15;15000
+GV-BUA-UA2-S03-007;Gaines de ventilation;GAINE;UA+2S03;12000
+GV-BUA-UA2-S03-008;Gaines de ventilation;GAINE;UA+2S03;9500
+GV-BUA-UA2-S01-001;Gaines de ventilation;GAINE;UA+2S01;22000
+GV-BUA-UA0-S01-001;Gaines de ventilation;GAINE;UA+0S01;16000
+SG-BUA-UA1-S12-101;Gaines de ventilation;SUPPORT_GAINE;UA+1S12;
+SG-BUA-UA1-S12-102;Gaines de ventilation;SUPPORT_GAINE;UA+1S12;
+SG-BUA-UA1-S15-101;Gaines de ventilation;SUPPORT_GAINE;UA+1S15;
+SG-BUA-UA1-S15-102;Gaines de ventilation;SUPPORT_GAINE;UA+1S15;
+SG-BUA-UA1-S15-103;Gaines de ventilation;SUPPORT_GAINE;UA+1S15;
+SG-BUA-UA2-S03-101;Gaines de ventilation;SUPPORT_GAINE;UA+2S03;
+SG-BUA-UA2-S01-101;Gaines de ventilation;SUPPORT_GAINE;UA+2S01;
+SG-BUA-UA0-S01-101;Gaines de ventilation;SUPPORT_GAINE;UA+0S01;
+GV-BUA-UA1-S12-014;Gaines de ventilation;GAINE;UA+1S12;5000
+GV-BUA-XXXX;Gaines de ventilation;GAINE;UA+9S99;8000
+GV-BUA-UA0-S01-002;Gaines de ventilation;GAINE;UA+0S01;`;
+
+let MET_PENDING = null, OUV_PENDING = null;
+let METIERS_CACHE = null; // invalidé après import (mode cloud)
+
+function analyseMetiersCsv(text) {
+  const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim() !== "");
+  if (!lines.length) return { erreurGlobale: "Fichier vide." };
+  const head = lines[0];
+  const sep = (head.match(/;/g) || []).length >= (head.match(/,/g) || []).length ? ";" : ",";
+  const isHeader = /corps.*m[ée]tier/i.test(head);
+  const body = isHeader ? lines.slice(1) : lines;
+
+  const rows = [];
+  const vusType = new Map();
+  const c = { erreur: 0, doublon: 0, avert: 0, ok: 0 };
+
+  body.forEach((raw, i) => {
+    const cols = raw.split(sep).map((x) => x.trim());
+    const [corpsMetier = "", typeCode = "", typeLibelle = "", unite = "", nature = "", activitesRaw = "", operationsRaw = ""] = cols;
+    const activites = activitesRaw.split("|").map((x) => x.trim()).filter(Boolean);
+    const operations = operationsRaw.split("|").map((x) => x.trim()).filter(Boolean);
+    const problems = [];
+
+    if (!corpsMetier || !typeCode || !nature)
+      problems.push({ level: "erreur", msg: "ligne incomplète (corps de métier, type d'ouvrage et nature sont obligatoires)" });
+    if (nature && !["quantite", "operations"].includes(nature))
+      problems.push({ level: "erreur", msg: "nature inconnue — attendu « quantite » ou « operations »" });
+    if (nature === "quantite" && !unite)
+      problems.push({ level: "erreur", msg: "unité obligatoire pour un type d'ouvrage quantitatif" });
+    if (nature === "operations" && !operations.length)
+      problems.push({ level: "erreur", msg: "au moins une opération est requise pour un type d'ouvrage à opérations" });
+    if (!activites.length)
+      problems.push({ level: "avert", msg: "aucune activité déclarée pour ce type d'ouvrage" });
+
+    let doublon = false;
+    const key = corpsMetier + "|" + typeCode;
+    if (corpsMetier && typeCode) {
+      if (vusType.has(key)) { doublon = true; problems.push({ level: "doublon", msg: "type d'ouvrage déjà présent ligne " + vusType.get(key) }); }
+      else vusType.set(key, i + (isHeader ? 2 : 1));
+    }
+
+    const bloquant = problems.some((p) => p.level === "erreur") || doublon;
+    if (bloquant) { if (doublon) c.doublon++; else c.erreur++; }
+    else if (problems.length) c.avert++;
+    else c.ok++;
+
+    rows.push({ line: i + (isHeader ? 2 : 1), corpsMetier, typeCode, typeLibelle: typeLibelle || typeCode, unite, nature, activites, operations, problems, bloquant });
+  });
+
+  const kept = rows.filter((r) => !r.bloquant);
+  const uniq = (arr) => [...new Set(arr)];
+  const stats = {
+    lignes: rows.length,
+    corpsMetier: uniq(kept.map((r) => r.corpsMetier)).length,
+    typeOuvrage: kept.length,
+    activites: kept.reduce((n, r) => n + r.activites.length, 0),
+    operations: kept.reduce((n, r) => n + r.operations.length, 0),
+  };
+  return { rows, kept, stats, counts: c, sep };
+}
+
+function analyseOuvragesCsv(text, typeIndex, localSet) {
+  const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim() !== "");
+  if (!lines.length) return { erreurGlobale: "Fichier vide." };
+  const head = lines[0];
+  const sep = (head.match(/;/g) || []).length >= (head.match(/,/g) || []).length ? ";" : ",";
+  const isHeader = /rep[eè]re/i.test(head);
+  const body = isHeader ? lines.slice(1) : lines;
+
+  const rows = [];
+  const vus = new Map();
+  const c = { erreur: 0, doublon: 0, avert: 0, ok: 0 };
+
+  body.forEach((raw, i) => {
+    const cols = raw.split(sep).map((x) => x.trim());
+    const [repere = "", corpsMetier = "", typeCode = "", local = "", quantiteRaw = ""] = cols;
+    const problems = [];
+
+    if (!repere || !corpsMetier || !typeCode || !local)
+      problems.push({ level: "erreur", msg: "ligne incomplète (repère, corps de métier, type d'ouvrage et local sont obligatoires)" });
+
+    const type = typeIndex.get(corpsMetier + "|" + typeCode);
+    if (corpsMetier && typeCode && !type)
+      problems.push({ level: "erreur", msg: "type d'ouvrage inconnu — importez d'abord la configuration métiers (étape 1)" });
+    if (local && !localSet.has(local))
+      problems.push({ level: "erreur", msg: "local inconnu du référentiel géographique" });
+
+    const quantitePrevue = quantiteRaw ? Number(quantiteRaw.replace(",", ".")) : null;
+    if (type && type.nature === "quantite" && (quantiteRaw === "" || Number.isNaN(quantitePrevue)))
+      problems.push({ level: "erreur", msg: "quantité prévue obligatoire pour ce type d'ouvrage" });
+
+    let doublon = false;
+    if (repere) {
+      if (vus.has(repere)) { doublon = true; problems.push({ level: "doublon", msg: "repère déjà présent ligne " + vus.get(repere) }); }
+      else vus.set(repere, i + (isHeader ? 2 : 1));
+    }
+
+    const bloquant = problems.some((p) => p.level === "erreur") || doublon;
+    if (bloquant) { if (doublon) c.doublon++; else c.erreur++; }
+    else if (problems.length) c.avert++;
+    else c.ok++;
+
+    rows.push({ line: i + (isHeader ? 2 : 1), repere, corpsMetier, typeCode, typeLibelle: type ? type.libelle : typeCode, unite: type ? type.unite : "", nature: type ? type.nature : "", local, quantitePrevue, problems, bloquant });
+  });
+
+  const kept = rows.filter((r) => !r.bloquant);
+  const uniq = (arr) => [...new Set(arr)];
+  const stats = { lignes: rows.length, ouvrages: kept.length, locaux: uniq(kept.map((r) => r.local)).length, types: uniq(kept.map((r) => r.corpsMetier + "|" + r.typeCode)).length };
+  return { rows, kept, stats, counts: c, sep };
+}
+
+/* ---------------------------------------------------------------------
+   Écran — Ouvrages, métiers, activités
+   --------------------------------------------------------------------- */
+async function renderOuvrages(s) {
+  if (!PEUT_GERER_COMPTES(s.role)) { go("/"); return route(); }
+  shell(s, "referentiels", "Ouvrages, métiers, activités", '<div class="card"><div class="muted">Chargement…</div></div>');
+  const [ms, os] = await Promise.all([DB.metiersSummary(s.chantier.id), DB.ouvrageSummary(s.chantier.id)]);
+
+  $(".content").innerHTML = `
+    <div class="spread">
+      <h2 style="margin:0"><a href="#/referentiels" style="font-weight:400;font-size:13px">Référentiels</a> &nbsp;›&nbsp; Ouvrages, métiers, activités</h2>
+      <span class="muted">${ms.typeOuvrage} types d'ouvrage · ${os.total} ouvrages</span>
+    </div>
+
+    <div class="card" style="margin-bottom:18px">
+      <h3 style="margin-bottom:10px">1 — Métiers et types d'ouvrage</h3>
+      <p class="hint" style="margin-top:0">Une ligne par type d'ouvrage : <span class="mono">Corps de métier ; Type d'ouvrage ; Libellé ; Unité ; Nature (quantite/operations) ; Activités ; Opérations</span>. Valeurs multiples séparées par <span class="mono">|</span>.</p>
+      <div class="row">
+        <input type="file" id="met-file" accept=".csv,text/csv,text/plain" class="inp" style="max-width:280px">
+        <button class="btn secondary small" id="met-demo">Charger la config pilote (gaines + supports)</button>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label>… ou coller les lignes</label>
+        <textarea class="inp" id="met-paste" rows="3" placeholder="Corps de métier;Type d'ouvrage;Libellé;Unité;Nature;Activités;Opérations"></textarea>
+      </div>
+      <button class="btn primary" id="met-analyse">Prévisualiser</button>
+      <div id="met-preview"></div>
+      <div id="met-browse" style="margin-top:16px"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:10px">2 — Ouvrages à réaliser</h3>
+      <p class="hint" style="margin-top:0">Une ligne par repère fonctionnel : <span class="mono">Repère fonctionnel ; Corps de métier ; Type d'ouvrage ; Local ; Quantité prévue</span>. Le type d'ouvrage et le local doivent déjà exister.</p>
+      <div class="row">
+        <input type="file" id="ouv-file" accept=".csv,text/csv,text/plain" class="inp" style="max-width:280px">
+        <button class="btn secondary small" id="ouv-demo"${ms.typeOuvrage ? "" : " disabled"}>Charger le jeu pilote (gaines + supports, BUA)</button>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label>… ou coller les lignes</label>
+        <textarea class="inp" id="ouv-paste" rows="3" placeholder="Repère fonctionnel;Corps de métier;Type d'ouvrage;Local;Quantité prévue"></textarea>
+      </div>
+      <button class="btn primary" id="ouv-analyse"${ms.typeOuvrage ? "" : " disabled"}>Prévisualiser</button>
+      ${ms.typeOuvrage ? "" : '<div class="hint">Importez d\'abord la configuration métiers (étape 1) avant les ouvrages.</div>'}
+      <div id="ouv-preview"></div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <h3 style="margin-bottom:10px">Consulter les ouvrages</h3>
+      <div id="ouv-browse"></div>
+    </div>
+  `;
+
+  $("#met-demo").onclick = () => { $("#met-paste").value = METIERS_DEMO_CSV; toast("Configuration pilote chargée — cliquez « Prévisualiser »."); };
+  $("#met-file").onchange = (e) => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { $("#met-paste").value = rd.result; toast("Fichier lu."); }; rd.readAsText(f, "utf-8"); };
+  $("#met-analyse").onclick = () => {
+    const txt = $("#met-paste").value.trim();
+    if (!txt) return toast("Aucune donnée à prévisualiser.", "err");
+    MET_PENDING = analyseMetiersCsv(txt);
+    paintMetiersPreview(s);
+  };
+
+  const ouvDemo = $("#ouv-demo"), ouvFile = $("#ouv-file"), ouvAnalyse = $("#ouv-analyse");
+  if (ouvDemo) ouvDemo.onclick = () => { $("#ouv-paste").value = OUVRAGES_DEMO_CSV; toast("Jeu pilote chargé — cliquez « Prévisualiser »."); };
+  if (ouvFile) ouvFile.onchange = (e) => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { $("#ouv-paste").value = rd.result; toast("Fichier lu."); }; rd.readAsText(f, "utf-8"); };
+  if (ouvAnalyse) ouvAnalyse.onclick = async () => {
+    const txt = $("#ouv-paste").value.trim();
+    if (!txt) return toast("Aucune donnée à prévisualiser.", "err");
+    const tree = await DB.metiersTree(s.chantier.id);
+    const typeIndex = new Map();
+    tree.forEach((cm) => cm.types.forEach((t) => typeIndex.set(cm.code + "|" + t.code, { nature: t.nature, unite: t.unite, libelle: t.libelle })));
+    const geoTree = await DB.geoTree(s.chantier.id);
+    const localSet = new Set();
+    geoTree.forEach((b) => b.niveaux.forEach((n) => n.zones.forEach((z) => z.locaux.forEach((l) => localSet.add(l.code)))));
+    OUV_PENDING = analyseOuvragesCsv(txt, typeIndex, localSet);
+    paintOuvragesPreview(s);
+  };
+
+  paintMetiersBrowse(s);
+  paintOuvragesBrowse(s);
+}
+
+function paintMetiersPreview(s) {
+  const a = MET_PENDING;
+  const el = $("#met-preview");
+  if (!a) { el.innerHTML = ""; return; }
+  if (a.erreurGlobale) { el.innerHTML = `<div class="formerr" style="margin-top:12px">${esc(a.erreurGlobale)}</div>`; return; }
+
+  const anomalies = a.rows.filter((r) => r.problems.length);
+  el.innerHTML = `
+    <div style="margin-top:16px">
+      <div class="row" style="gap:18px;font-size:13px">
+        <span><b>${a.stats.lignes}</b> lignes lues</span>
+        <span><b>${a.stats.corpsMetier}</b> corps de métier</span>
+        <span><b>${a.stats.typeOuvrage}</b> types d'ouvrage</span>
+        <span><b>${a.stats.activites}</b> activités</span>
+        <span><b>${a.stats.operations}</b> opérations</span>
+      </div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        ${a.counts.erreur ? `<span class="bdg" style="background:var(--red-bg);color:var(--red-ink)">${a.counts.erreur} erreur${a.counts.erreur > 1 ? "s" : ""}</span>` : ""}
+        ${a.counts.doublon ? `<span class="bdg" style="background:var(--red-bg);color:var(--red-ink)">${a.counts.doublon} doublon${a.counts.doublon > 1 ? "s" : ""}</span>` : ""}
+        ${a.counts.avert ? `<span class="bdg flag" style="background:var(--amber-bg);color:var(--amber-ink)">${a.counts.avert} avertissement${a.counts.avert > 1 ? "s" : ""}</span>` : ""}
+        <span class="bdg on">${a.kept.length} lignes retenues</span>
+      </div>
+      ${anomalies.length ? `
+      <table class="grid" style="margin-top:12px">
+        <thead><tr><th>Ligne</th><th>Type d'ouvrage</th><th>Anomalie</th></tr></thead>
+        <tbody>
+          ${anomalies.map((r) => `
+            <tr${r.bloquant ? ' style="background:var(--red-bg)"' : ' style="background:var(--amber-bg)"'}>
+              <td class="mono">${r.line}</td>
+              <td class="mono">${esc(r.corpsMetier)} / ${esc(r.typeCode)}</td>
+              <td>${r.problems.map((p) => `<div style="color:${p.level === "avert" ? "var(--amber-ink)" : "var(--red-ink)"}">${esc(p.msg)}</div>`).join("")}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>` : `<div class="al ok" style="margin-top:12px">Aucune anomalie détectée.</div>`}
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="met-commit"${a.kept.length ? "" : " disabled"}>Valider l'import (${a.kept.length} types)</button>
+        <button class="btn secondary" id="met-cancel">Annuler</button>
+      </div>
+    </div>`;
+
+  const cm = $("#met-commit");
+  if (cm) cm.onclick = async () => {
+    cm.disabled = true; cm.textContent = "Import…";
+    const res = await DB.metiersImportCommit(s.chantier.id, a.kept);
+    MET_PENDING = null;
+    toast(`Import validé — ${res.stats.typeOuvrage} types d'ouvrage, ${res.stats.corpsMetier} corps de métier.`);
+    renderOuvrages(Session.get());
+  };
+  $("#met-cancel").onclick = () => { MET_PENDING = null; paintMetiersPreview(s); toast("Import annulé — rien n'a été écrit."); };
+}
+
+async function paintMetiersBrowse(s) {
+  const box = $("#met-browse");
+  const tree = await DB.metiersTree(s.chantier.id);
+  if (!tree.length) { box.innerHTML = `<div class="hint">Aucune configuration importée pour l'instant.</div>`; return; }
+  box.innerHTML = tree.map((cm) => `
+    <div style="margin-top:10px">
+      <b class="mono">${esc(cm.code)}</b>
+      ${cm.types.map((t) => `
+        <div style="margin:6px 0 6px 16px;padding:8px 12px;background:var(--panel-2);border-radius:6px">
+          <div><span class="mono">${esc(t.code)}</span> — ${esc(t.libelle)} <span class="bdg role">${t.nature === "quantite" ? "quantité (" + esc(t.unite) + ")" : "opérations"}</span></div>
+          ${t.activites.length ? `<div class="hint">Activités : ${t.activites.map((a) => esc(a.libelle)).join(", ")}</div>` : ""}
+          ${t.operations.length ? `<div class="hint">Opérations : ${t.operations.map((o) => esc(o.libelle)).join(", ")}</div>` : ""}
+        </div>`).join("")}
+    </div>`).join("");
+}
+
+function paintOuvragesPreview(s) {
+  const a = OUV_PENDING;
+  const el = $("#ouv-preview");
+  if (!a) { el.innerHTML = ""; return; }
+  if (a.erreurGlobale) { el.innerHTML = `<div class="formerr" style="margin-top:12px">${esc(a.erreurGlobale)}</div>`; return; }
+
+  const anomalies = a.rows.filter((r) => r.problems.length);
+  el.innerHTML = `
+    <div style="margin-top:16px">
+      <div class="row" style="gap:18px;font-size:13px">
+        <span><b>${a.stats.lignes}</b> lignes lues</span>
+        <span><b>${a.stats.ouvrages}</b> ouvrages</span>
+        <span><b>${a.stats.locaux}</b> locaux concernés</span>
+        <span><b>${a.stats.types}</b> types d'ouvrage utilisés</span>
+      </div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        ${a.counts.erreur ? `<span class="bdg" style="background:var(--red-bg);color:var(--red-ink)">${a.counts.erreur} erreur${a.counts.erreur > 1 ? "s" : ""}</span>` : ""}
+        ${a.counts.doublon ? `<span class="bdg" style="background:var(--red-bg);color:var(--red-ink)">${a.counts.doublon} doublon${a.counts.doublon > 1 ? "s" : ""}</span>` : ""}
+        <span class="bdg on">${a.kept.length} lignes retenues</span>
+      </div>
+      ${anomalies.length ? `
+      <table class="grid" style="margin-top:12px">
+        <thead><tr><th>Ligne</th><th>Repère</th><th>Anomalie</th></tr></thead>
+        <tbody>
+          ${anomalies.slice(0, 60).map((r) => `
+            <tr${r.bloquant ? ' style="background:var(--red-bg)"' : ' style="background:var(--amber-bg)"'}>
+              <td class="mono">${r.line}</td>
+              <td class="mono">${esc(r.repere || "—")}</td>
+              <td>${r.problems.map((p) => `<div style="color:${p.level === "avert" ? "var(--amber-ink)" : "var(--red-ink)"}">${esc(p.msg)}</div>`).join("")}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>` : `<div class="al ok" style="margin-top:12px">Aucune anomalie détectée.</div>`}
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="ouv-commit"${a.kept.length ? "" : " disabled"}>Valider l'import (${a.kept.length} ouvrages)</button>
+        <button class="btn secondary" id="ouv-cancel">Annuler</button>
+      </div>
+    </div>`;
+
+  const cm = $("#ouv-commit");
+  if (cm) cm.onclick = async () => {
+    cm.disabled = true; cm.textContent = "Import…";
+    const res = await DB.ouvrageImportCommit(s.chantier.id, a.kept, s.user.id);
+    OUV_PENDING = null;
+    toast(`Import validé — ${res.stats.total} ouvrages au référentiel.`);
+    renderOuvrages(Session.get());
+  };
+  $("#ouv-cancel").onclick = () => { OUV_PENDING = null; paintOuvragesPreview(s); toast("Import annulé — rien n'a été écrit."); };
+}
+
+async function paintOuvragesBrowse(s) {
+  const box = $("#ouv-browse");
+  const tree = await DB.metiersTree(s.chantier.id);
+  const typeOptions = [];
+  tree.forEach((cm) => cm.types.forEach((t) => typeOptions.push({ v: cm.code + "|" + t.code, label: cm.code + " / " + t.libelle })));
+
+  box.innerHTML = `
+    <div class="row" style="margin-bottom:10px">
+      <input class="inp" id="ouv-f-local" placeholder="Filtrer par local" style="max-width:200px">
+      <select class="inp" id="ouv-f-type" style="max-width:280px"><option value="">Tous les types d'ouvrage</option>${typeOptions.map((o) => `<option value="${esc(o.v)}">${esc(o.label)}</option>`).join("")}</select>
+    </div>
+    <div id="ouv-table"><div class="hint">Chargement…</div></div>
+  `;
+
+  async function refresh() {
+    const localVal = $("#ouv-f-local").value.trim();
+    const typeVal = $("#ouv-f-type").value;
+    const typeCode = typeVal ? typeVal.split("|")[1] : null;
+    let rows = await DB.ouvrageList(s.chantier.id, { type: typeCode });
+    if (localVal) rows = rows.filter((r) => (r.local || "").toLowerCase().includes(localVal.toLowerCase()));
+
+    $("#ouv-table").innerHTML = rows.length ? `
+      <table class="grid">
+        <thead><tr><th>Repère</th><th>Type</th><th>Local</th><th>Prévu</th><th>Posé</th><th>Restant</th><th>Statut</th></tr></thead>
+        <tbody>${rows.map((r) => `
+          <tr>
+            <td class="mono">${esc(r.repere)}</td>
+            <td>${esc(r.typeLibelle)}</td>
+            <td class="mono">${esc(r.local)}</td>
+            <td>${r.quantitePrevue != null ? r.quantitePrevue + " " + esc(r.unite || "") : "—"}</td>
+            <td>${r.pose} ${r.nature === "quantite" ? esc(r.unite || "") : ""}</td>
+            <td>${r.restant != null ? r.restant + " " + esc(r.unite || "") : "—"}</td>
+            <td>${r.statut === "a_rattacher" ? '<span class="bdg flag">à rattacher</span>' : '<span class="bdg on">actif</span>'}</td>
+          </tr>`).join("")}</tbody>
+      </table>
+      <div class="hint">« Posé » et « Restant » se rempliront avec la saisie des déclarations (phase 4) — pour l'instant, posé = 0.</div>
+      ` : `<div class="hint">Aucun ouvrage${localVal || typeVal ? " pour ce filtre" : " importé pour l'instant"}.</div>`;
+  }
+  $("#ouv-f-local").oninput = refresh;
+  $("#ouv-f-type").onchange = refresh;
+  refresh();
 }
 
 </script>
