@@ -134,7 +134,7 @@ table.grid tbody tr:hover{background:var(--panel-2)}
    Voir docs/PLAN.md (Phase 1), docs/business_rules.md (RG-1 → RG-8).
    ===================================================================== */
 
-const APP_VERSION = "0.4.0";
+const APP_VERSION = "0.5.0";
 
 /* ---------------------------------------------------------------------
    Configuration du déploiement (principe PRD n°12 — neutralité).
@@ -180,6 +180,10 @@ const DEMO = {
   // Référentiel métiers / ouvrages — vide au départ, alimenté par import (Phase 3)
   metiers: { corpsMetier: [], typeOuvrage: [], activite: [], operation: [] },
   ouvrages: [],
+  // Production — vide au départ, alimenté par la saisie (Phase 4)
+  declarations: [],
+  lignes: [],
+  journal: [],
 };
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -317,7 +321,7 @@ const DB_DEMO = {
     for (const r of kept) {
       if (seen.has(r.repere)) continue;
       seen.add(r.repere);
-      DEMO.ouvrages.push({ repere: r.repere, corpsMetier: r.corpsMetier, typeCode: r.typeCode, typeLibelle: r.typeLibelle, unite: r.unite, nature: r.nature, local: r.local, quantitePrevue: r.quantitePrevue, statut: "actif" });
+      DEMO.ouvrages.push({ id: "ov-" + Math.random().toString(36).slice(2, 9), repere: r.repere, corpsMetier: r.corpsMetier, typeCode: r.typeCode, typeLibelle: r.typeLibelle, unite: r.unite, nature: r.nature, local: r.local, quantitePrevue: r.quantitePrevue, statut: "actif" });
     }
     return { ok: true, stats: await DB_DEMO.ouvrageSummary() };
   },
@@ -326,6 +330,89 @@ const DB_DEMO = {
     let rows = DEMO.ouvrages;
     if (filters && filters.type) rows = rows.filter((o) => o.typeCode === filters.type);
     return rows.map((o) => ({ ...o, pose: 0, restant: o.quantitePrevue }));
+  },
+
+  /* ----- Phase 4 : saisie d'une déclaration et traçabilité ----- */
+  async ouvrageIndex(_chantierId) {
+    await wait(40);
+    return DEMO.ouvrages.map((o) => ({ id: o.id, repere: o.repere, typeCode: o.typeCode, corpsMetier: o.corpsMetier }));
+  },
+  async declarationCreate(_chantierId, payload, auteurId) {
+    await wait(150);
+    const decl = {
+      id: "d-" + Math.random().toString(36).slice(2, 9),
+      date: payload.date, equipe: payload.equipe, local: payload.localCode, corpsMetier: payload.corpsMetierCode,
+      auteurId, creeLe: new Date().toISOString(),
+    };
+    DEMO.declarations.push(decl);
+
+    const metiers = DEMO.metiers;
+    const lignesInconnues = [];
+    for (const l of payload.lignes) {
+      let ouv = DEMO.ouvrages.find((o) => o.repere === l.repere);
+      if (!ouv) {
+        const t = metiers.typeOuvrage.find((t) => t.corps === payload.corpsMetierCode && t.code === l.typeCode);
+        ouv = { id: "ov-" + Math.random().toString(36).slice(2, 9), repere: l.repere, corpsMetier: payload.corpsMetierCode, typeCode: l.typeCode, typeLibelle: t ? t.libelle : l.typeCode, unite: t ? t.unite : "", nature: t ? t.nature : "quantite", local: payload.localCode, quantitePrevue: null, statut: "a_rattacher" };
+        DEMO.ouvrages.push(ouv);
+        lignesInconnues.push(l.repere);
+      }
+      const act = metiers.activite.find((a) => a.corps === payload.corpsMetierCode && a.type === l.typeCode && a.code === l.activiteCode);
+      DEMO.lignes.push({
+        id: "l-" + Math.random().toString(36).slice(2, 9), declarationId: decl.id, ouvrageId: ouv.id,
+        repere: l.repere, typeCode: ouv.typeCode, typeLibelle: ouv.typeLibelle, unite: ouv.unite, nature: ouv.nature,
+        activiteCode: l.activiteCode, activiteLibelle: act ? act.libelle : l.activiteCode,
+        quantite: l.quantite != null ? l.quantite : null, operationsFaites: l.operationsFaites || [],
+        commentaire: l.commentaire || "", pointsBloquants: l.pointsBloquants || "", solde: !!l.solde,
+        auteurId, creeLe: new Date().toISOString(), modifieLe: new Date().toISOString(),
+      });
+    }
+    return { ok: true, declarationId: decl.id, lignesInconnues };
+  },
+  async declarationRecent(_chantierId, opts) {
+    await wait(60);
+    const limit = (opts && opts.limit) || 20;
+    return [...DEMO.declarations]
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.creeLe < b.creeLe ? 1 : -1)))
+      .slice(0, limit)
+      .map((d) => ({
+        id: d.id, date: d.date, equipe: d.equipe, local: d.local, corpsMetier: d.corpsMetier,
+        auteurNom: (DEMO.users.find((u) => u.id === d.auteurId) || {}).nom_affiche || "—",
+        lignesCount: DEMO.lignes.filter((l) => l.declarationId === d.id).length,
+      }));
+  },
+  async declarationGet(_chantierId, declarationId) {
+    await wait(50);
+    const d = DEMO.declarations.find((x) => x.id === declarationId);
+    if (!d) return null;
+    const metiers = DEMO.metiers;
+    const lignes = DEMO.lignes.filter((l) => l.declarationId === declarationId).map((l) => ({
+      ...l,
+      operations: metiers.operation.filter((o) => o.corps === d.corpsMetier && o.type === l.typeCode),
+      activites: metiers.activite.filter((a) => a.corps === d.corpsMetier && a.type === l.typeCode),
+    }));
+    return { declaration: d, lignes };
+  },
+  async ligneUpdate(_chantierId, ligneId, patch, auteurId) {
+    await wait(80);
+    const l = DEMO.lignes.find((x) => x.id === ligneId);
+    if (!l) return { error: "Ligne introuvable." };
+    const champs = ["quantite", "operationsFaites", "commentaire", "pointsBloquants", "solde"];
+    for (const champ of champs) {
+      if (!(champ in patch)) continue;
+      const avant = JSON.stringify(l[champ]), apres = JSON.stringify(patch[champ]);
+      if (avant !== apres) {
+        DEMO.journal.push({ id: "j-" + Math.random().toString(36).slice(2, 9), table: "ligne_declaration", enregistrementId: ligneId, champ, avant: l[champ], apres: patch[champ], auteurId, faitLe: new Date().toISOString() });
+        l[champ] = patch[champ];
+      }
+    }
+    l.modifieLe = new Date().toISOString();
+    return { ok: true };
+  },
+  async journalFor(_chantierId, _table, enregistrementId) {
+    await wait(40);
+    return DEMO.journal.filter((j) => j.enregistrementId === enregistrementId)
+      .sort((a, b) => (a.faitLe < b.faitLe ? 1 : -1))
+      .map((j) => ({ ...j, auteurNom: (DEMO.users.find((u) => u.id === j.auteurId) || {}).nom_affiche || "—" }));
   },
 };
 
@@ -574,6 +661,135 @@ const DB_SUPABASE = {
     if (filters && filters.type) rows = rows.filter((r) => r.typeCode === filters.type);
     return rows;
   },
+
+  /* ----- Phase 4 : saisie d'une déclaration et traçabilité ----- */
+  async ouvrageIndex(chantierId) {
+    const { data, error } = await supa()
+      .from("ouvrage")
+      .select("id, repere_fonctionnel, type_ouvrage:type_ouvrage_id(code, corps_metier:corps_metier_id(code))")
+      .eq("chantier_id", chantierId);
+    if (error) { console.error(error); return []; }
+    return (data || []).map((o) => ({ id: o.id, repere: o.repere_fonctionnel, typeCode: o.type_ouvrage && o.type_ouvrage.code, corpsMetier: o.type_ouvrage && o.type_ouvrage.corps_metier && o.type_ouvrage.corps_metier.code }));
+  },
+  async declarationCreate(chantierId, payload, auteurId) {
+    const sb = supa();
+    if (!METIERS_CACHE) await DB_SUPABASE.metiersTree(chantierId);
+    const idCM = Object.fromEntries(METIERS_CACHE.corpsMetier.map((c) => [c.code, c.id]));
+    const idT = Object.fromEntries(METIERS_CACHE.typeOuvrage.map((t) => [t.corps_metier_id + "|" + t.code, t.id]));
+    const idA = Object.fromEntries(METIERS_CACHE.activite.map((a) => [a.type_ouvrage_id + "|" + a.code, a.id]));
+
+    const { data: locRow, error: locErr } = await sb.from("local").select("id").eq("chantier_id", chantierId).eq("code", payload.localCode).maybeSingle();
+    if (locErr || !locRow) return { error: "Local introuvable au référentiel géographique." };
+    const cmId = idCM[payload.corpsMetierCode];
+
+    const { data: decl, error: declErr } = await sb.from("declaration").insert({
+      chantier_id: chantierId, date_decl: payload.date, equipe: payload.equipe || null, local_id: locRow.id, corps_metier_id: cmId, auteur_id: auteurId,
+    }).select("id").single();
+    if (declErr) return { error: declErr.message };
+
+    const lignesInconnues = [];
+    const lignesRows = [];
+    for (const l of payload.lignes) {
+      const tId = idT[cmId + "|" + l.typeCode];
+      let ouv = null;
+      const found = await sb.from("ouvrage").select("id").eq("chantier_id", chantierId).eq("repere_fonctionnel", l.repere).maybeSingle();
+      ouv = found.data;
+      if (!ouv) {
+        const created = await sb.from("ouvrage").insert({ chantier_id: chantierId, repere_fonctionnel: l.repere, local_id: locRow.id, type_ouvrage_id: tId, quantite_prevue: null, statut: "a_rattacher" }).select("id").single();
+        if (created.error) return { error: created.error.message };
+        ouv = created.data;
+        lignesInconnues.push(l.repere);
+      }
+      const aId = idA[tId + "|" + l.activiteCode] || null;
+      lignesRows.push({
+        chantier_id: chantierId, declaration_id: decl.id, ouvrage_id: ouv.id, activite_id: aId,
+        quantite: l.quantite, operations_faites: l.operationsFaites || [], commentaire: l.commentaire || null, points_bloquants: l.pointsBloquants || null, solde: !!l.solde, auteur_id: auteurId,
+      });
+    }
+    if (lignesRows.length) {
+      const { error: lErr } = await sb.from("ligne_declaration").insert(lignesRows);
+      if (lErr) return { error: lErr.message };
+    }
+    return { ok: true, declarationId: decl.id, lignesInconnues };
+  },
+  async declarationRecent(chantierId, opts) {
+    const limit = (opts && opts.limit) || 20;
+    const { data: decls, error } = await supa()
+      .from("declaration")
+      .select("id,date_decl,equipe,local:local_id(code),corps_metier:corps_metier_id(code),auteur:auteur_id(nom_affiche)")
+      .eq("chantier_id", chantierId)
+      .order("date_decl", { ascending: false })
+      .order("cree_le", { ascending: false })
+      .limit(limit);
+    if (error) { console.error(error); return []; }
+    const ids = (decls || []).map((d) => d.id);
+    const counts = {};
+    if (ids.length) {
+      const { data: lignes } = await supa().from("ligne_declaration").select("declaration_id").in("declaration_id", ids);
+      (lignes || []).forEach((l) => { counts[l.declaration_id] = (counts[l.declaration_id] || 0) + 1; });
+    }
+    return (decls || []).map((d) => ({
+      id: d.id, date: d.date_decl, equipe: d.equipe,
+      local: d.local && d.local.code, corpsMetier: d.corps_metier && d.corps_metier.code,
+      auteurNom: (d.auteur && d.auteur.nom_affiche) || "—", lignesCount: counts[d.id] || 0,
+    }));
+  },
+  async declarationGet(chantierId, declarationId) {
+    const sb = supa();
+    const { data: d } = await sb.from("declaration").select("id,date_decl,equipe,local:local_id(code),corps_metier:corps_metier_id(code)").eq("id", declarationId).maybeSingle();
+    if (!d) return null;
+    if (!METIERS_CACHE) await DB_SUPABASE.metiersTree(chantierId);
+    const { data: lignesRaw } = await sb
+      .from("ligne_declaration")
+      .select("id,quantite,operations_faites,commentaire,points_bloquants,solde,ouvrage:ouvrage_id(repere_fonctionnel,type_ouvrage_id),activite:activite_id(code,libelle)")
+      .eq("declaration_id", declarationId);
+    const typeById = Object.fromEntries(METIERS_CACHE.typeOuvrage.map((t) => [t.id, t]));
+    const lignes = (lignesRaw || []).map((l) => {
+      const tid = l.ouvrage && l.ouvrage.type_ouvrage_id;
+      const t = typeById[tid];
+      return {
+        id: l.id, repere: l.ouvrage && l.ouvrage.repere_fonctionnel,
+        typeCode: t && t.code, typeLibelle: t && t.libelle, unite: t && t.unite, nature: t && t.nature,
+        activiteCode: l.activite && l.activite.code, activiteLibelle: l.activite && l.activite.libelle,
+        quantite: l.quantite, operationsFaites: l.operations_faites || [], commentaire: l.commentaire, pointsBloquants: l.points_bloquants, solde: l.solde,
+        operations: METIERS_CACHE.operation.filter((o) => o.type_ouvrage_id === tid),
+        activites: METIERS_CACHE.activite.filter((a) => a.type_ouvrage_id === tid),
+      };
+    });
+    return { declaration: { id: d.id, date: d.date_decl, equipe: d.equipe, local: d.local && d.local.code, corpsMetier: d.corps_metier && d.corps_metier.code }, lignes };
+  },
+  async ligneUpdate(chantierId, ligneId, patch, auteurId) {
+    const sb = supa();
+    const { data: before } = await sb.from("ligne_declaration").select("quantite,operations_faites,commentaire,points_bloquants,solde").eq("id", ligneId).maybeSingle();
+    if (!before) return { error: "Ligne introuvable." };
+    const colMap = { quantite: "quantite", operationsFaites: "operations_faites", commentaire: "commentaire", pointsBloquants: "points_bloquants", solde: "solde" };
+    const updates = {}; const journalRows = [];
+    for (const champ of Object.keys(colMap)) {
+      if (!(champ in patch)) continue;
+      const col = colMap[champ];
+      const avant = JSON.stringify(before[col]), apres = JSON.stringify(patch[champ]);
+      if (avant !== apres) {
+        updates[col] = patch[champ];
+        journalRows.push({ chantier_id: chantierId, table_cible: "ligne_declaration", enregistrement_id: ligneId, champ, ancienne_valeur: avant, nouvelle_valeur: apres, auteur_id: auteurId });
+      }
+    }
+    if (Object.keys(updates).length) {
+      updates.modifie_le = new Date().toISOString();
+      const { error } = await sb.from("ligne_declaration").update(updates).eq("id", ligneId);
+      if (error) return { error: error.message };
+      if (journalRows.length) await sb.from("journal_modification").insert(journalRows);
+    }
+    return { ok: true };
+  },
+  async journalFor(chantierId, table, enregistrementId) {
+    const { data, error } = await supa()
+      .from("journal_modification")
+      .select("champ,ancienne_valeur,nouvelle_valeur,fait_le,auteur:auteur_id(nom_affiche)")
+      .eq("chantier_id", chantierId).eq("table_cible", table).eq("enregistrement_id", enregistrementId)
+      .order("fait_le", { ascending: false });
+    if (error) { console.error(error); return []; }
+    return (data || []).map((j) => ({ champ: j.champ, avant: j.ancienne_valeur, apres: j.nouvelle_valeur, auteurNom: (j.auteur && j.auteur.nom_affiche) || "—", faitLe: j.fait_le }));
+  },
 };
 
 /* Sélection de l'implémentation — même interface, seule la source de
@@ -590,6 +806,7 @@ const ROLE_LABEL = {
   admin: "Administrateur",
 };
 const PEUT_GERER_COMPTES = (role) => role === "ingenieur_data" || role === "admin"; // RG-5
+const PEUT_SAISIR = (role) => role === "saisisseur" || role === "ingenieur_data" || role === "admin"; // US-13
 
 const Session = {
   get() { try { return JSON.parse(sessionStorage.getItem("d08.session") || "null"); } catch { return null; } },
@@ -631,6 +848,7 @@ async function route() {
   if (hash.startsWith("/referentiels/geo")) return renderGeo(s);
   if (hash.startsWith("/referentiels/ouvrages")) return renderOuvrages(s);
   if (hash.startsWith("/referentiels")) return renderReferentiels(s);
+  if (hash.startsWith("/saisie")) return renderSaisie(s);
   return renderAccueil(s);
 }
 window.addEventListener("hashchange", route);
@@ -721,6 +939,7 @@ function shell(s, activeKey, title, bodyHTML) {
   const gere = PEUT_GERER_COMPTES(s.role);
   const nav = [
     ["accueil", "Accueil", "#/"],
+    PEUT_SAISIR(s.role) ? ["saisie", "Saisie", "#/saisie"] : null,
     gere ? ["referentiels", "Référentiels", "#/referentiels"] : null,
     gere ? ["comptes", "Comptes", "#/comptes"] : null,
   ].filter(Boolean);
@@ -1624,6 +1843,277 @@ async function paintOuvragesBrowse(s) {
   $("#ouv-f-local").oninput = refresh;
   $("#ouv-f-type").onchange = refresh;
   refresh();
+}
+
+/* ===== PHASE 4 — saisie d'une déclaration et traçabilité ===== */
+
+let SAISIE_TYPES = [];
+let SAISIE_ROW_SEQ = 0;
+
+function saisieValeurCell(type) {
+  if (!type) return `<span class="muted">—</span>`;
+  if (type.nature === "quantite") {
+    return `<input class="inp sa-quantite" type="number" step="any" placeholder="0" style="width:100px"> <span class="muted" style="font-size:11px">${esc(type.unite)}</span>`;
+  }
+  return (type.operations || []).map((o) => `<label style="display:block;font-size:12px;font-weight:400"><input type="checkbox" class="sa-op" value="${esc(o.code)}"> ${esc(o.libelle)}</label>`).join("") || `<span class="muted">aucune opération définie</span>`;
+}
+
+function addSaisieRow() {
+  const tbody = $("#sa-tbody");
+  const key = "r" + (SAISIE_ROW_SEQ++);
+  const tr = document.createElement("tr");
+  tr.dataset.row = key;
+  tr.innerHTML = `
+    <td><select class="inp sa-type" style="min-width:150px"><option value="">—</option>${SAISIE_TYPES.map((t) => `<option value="${esc(t.code)}">${esc(t.libelle)}</option>`).join("")}</select></td>
+    <td><input class="inp sa-repere mono" style="min-width:150px" placeholder="repère fonctionnel"></td>
+    <td><select class="inp sa-activite" style="min-width:140px"><option value="">—</option></select></td>
+    <td class="sa-valeur">—</td>
+    <td><input class="inp sa-commentaire" style="min-width:140px"></td>
+    <td><input class="inp sa-bloquants" style="min-width:140px"></td>
+    <td style="text-align:center"><input type="checkbox" class="sa-solde"></td>
+    <td><button class="btn ghost small sa-del" type="button">✕</button></td>
+  `;
+  tbody.appendChild(tr);
+  const typeSel = tr.querySelector(".sa-type");
+  const actSel = tr.querySelector(".sa-activite");
+  const valCell = tr.querySelector(".sa-valeur");
+  typeSel.onchange = () => {
+    const t = SAISIE_TYPES.find((x) => x.code === typeSel.value);
+    actSel.innerHTML = `<option value="">—</option>` + (t ? t.activites.map((a) => `<option value="${esc(a.code)}">${esc(a.libelle)}</option>`).join("") : "");
+    valCell.innerHTML = saisieValeurCell(t);
+  };
+  tr.querySelector(".sa-del").onclick = () => tr.remove();
+  tr.querySelector(".sa-bloquants").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); addSaisieRow(); tbody.lastElementChild.querySelector(".sa-type").focus(); }
+  });
+  typeSel.focus();
+}
+
+function readSaisieRows() {
+  return [...document.querySelectorAll("#sa-tbody tr[data-row]")].map((tr) => {
+    const typeCode = tr.querySelector(".sa-type").value;
+    const repere = tr.querySelector(".sa-repere").value.trim();
+    const activiteCode = tr.querySelector(".sa-activite").value;
+    const t = SAISIE_TYPES.find((x) => x.code === typeCode);
+    let quantite = null, operationsFaites = [];
+    if (t && t.nature === "quantite") {
+      const raw = tr.querySelector(".sa-quantite");
+      quantite = raw && raw.value !== "" ? Number(raw.value) : null;
+    } else if (t) {
+      operationsFaites = [...tr.querySelectorAll(".sa-op:checked")].map((c) => c.value);
+    }
+    return {
+      key: tr.dataset.row, typeCode, repere, activiteCode, quantite, operationsFaites,
+      commentaire: tr.querySelector(".sa-commentaire").value.trim(),
+      pointsBloquants: tr.querySelector(".sa-bloquants").value.trim(),
+      solde: tr.querySelector(".sa-solde").checked,
+      nature: t ? t.nature : null, unite: t ? t.unite : null,
+    };
+  });
+}
+
+function validateSaisieRows(rows, ouvrageIndex) {
+  const errors = [];
+  const seen = new Map();
+  rows.forEach((r, i) => {
+    const msgs = [];
+    if (!r.typeCode || !r.repere || !r.activiteCode)
+      msgs.push("champ obligatoire manquant (type d'ouvrage, repère ou activité)");
+
+    const existing = ouvrageIndex.find((o) => o.repere === r.repere);
+    if (existing && r.typeCode && existing.typeCode && existing.typeCode !== r.typeCode)
+      msgs.push(`type d'ouvrage incohérent — ce repère est déjà connu comme « ${existing.typeCode} »`);
+
+    if (r.nature === "quantite") {
+      if (r.quantite == null) { if (!msgs.some((m) => m.includes("obligatoire"))) msgs.push("quantité manquante"); }
+      else if (!Number.isFinite(r.quantite) || r.quantite <= 0) msgs.push("quantité aberrante (doit être un nombre positif)");
+    }
+
+    const dk = r.repere + "|" + r.activiteCode;
+    if (r.repere && r.activiteCode) {
+      if (seen.has(dk)) msgs.push("doublon apparent — même repère et même activité que la ligne " + seen.get(dk));
+      else seen.set(dk, i + 1);
+    }
+
+    if (msgs.length) errors.push({ key: r.key, index: i + 1, msgs });
+  });
+  return errors;
+}
+
+/* ---------------------------------------------------------------------
+   Écran — Saisie d'une déclaration
+   --------------------------------------------------------------------- */
+async function renderSaisie(s) {
+  if (!PEUT_SAISIR(s.role)) { go("/"); return route(); }
+  shell(s, "saisie", "Saisie", '<div class="card"><div class="muted">Chargement…</div></div>');
+  const tree = await DB.metiersTree(s.chantier.id);
+  const geoTree = await DB.geoTree(s.chantier.id);
+  const locaux = [];
+  geoTree.forEach((b) => b.niveaux.forEach((n) => n.zones.forEach((z) => z.locaux.forEach((l) => locaux.push(l.code)))));
+
+  $(".content").innerHTML = `
+    <h2>Nouvelle déclaration</h2>
+    ${!tree.length ? `<div class="al warn">Aucune configuration métiers importée — allez d'abord dans <a href="#/referentiels/ouvrages">Référentiels → Ouvrages</a>.</div>` : `
+    <div class="card">
+      <div class="row" style="gap:16px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="margin:0"><label>Date</label><input class="inp" id="sa-date" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
+        <div class="field" style="margin:0"><label>Équipe</label><input class="inp" id="sa-equipe" placeholder="Noms de l'équipe" style="min-width:220px"></div>
+        <div class="field" style="margin:0"><label>Corps de métier</label><select class="inp" id="sa-metier"><option value="">— choisir —</option>${tree.map((cm) => `<option value="${esc(cm.code)}">${esc(cm.code)}</option>`).join("")}</select></div>
+        <div class="field" style="margin:0"><label>Local</label><input class="inp" id="sa-local" list="sa-locaux" placeholder="ex. UA+1S12"><datalist id="sa-locaux">${locaux.map((c) => `<option value="${esc(c)}">`).join("")}</datalist></div>
+      </div>
+
+      <div id="sa-grid-wrap" style="margin-top:16px;display:none">
+        <table class="grid">
+          <thead><tr><th>Type d'ouvrage</th><th>Repère fonctionnel</th><th>Activité</th><th>Valeur</th><th>Commentaire</th><th>Points bloquants</th><th>Soldé</th><th></th></tr></thead>
+          <tbody id="sa-tbody"></tbody>
+        </table>
+        <button class="btn secondary small" id="sa-add" style="margin-top:8px" type="button">+ Ajouter une ligne</button>
+        <div class="hint">Astuce : Entrée dans « Points bloquants » ajoute une nouvelle ligne sans lâcher le clavier.</div>
+      </div>
+      <div id="sa-errs"></div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="sa-save">Enregistrer la déclaration</button>
+      </div>
+    </div>
+    `}
+
+    <div class="card" style="margin-top:20px">
+      <h3 style="margin-bottom:10px">Déclarations récentes</h3>
+      <div id="sa-recent"><div class="hint">Chargement…</div></div>
+    </div>
+  `;
+
+  if (tree.length) {
+    $("#sa-metier").onchange = () => {
+      const cm = tree.find((c) => c.code === $("#sa-metier").value);
+      SAISIE_TYPES = cm ? cm.types : [];
+      $("#sa-tbody").innerHTML = "";
+      $("#sa-grid-wrap").style.display = SAISIE_TYPES.length ? "" : "none";
+      if (SAISIE_TYPES.length) addSaisieRow();
+    };
+    $("#sa-add").onclick = () => addSaisieRow();
+    $("#sa-save").onclick = () => saveSaisie(s);
+  }
+
+  paintDeclarationsRecentes(s);
+}
+
+async function saveSaisie(s) {
+  const date = $("#sa-date").value;
+  const equipe = $("#sa-equipe").value.trim();
+  const corpsMetierCode = $("#sa-metier").value;
+  const localCode = $("#sa-local").value.trim();
+  const rows = readSaisieRows();
+
+  const errs = $("#sa-errs");
+  errs.innerHTML = "";
+  const globalMsgs = [];
+  if (!date) globalMsgs.push("La date est obligatoire.");
+  if (!corpsMetierCode) globalMsgs.push("Le corps de métier est obligatoire.");
+  if (!localCode) globalMsgs.push("Le local est obligatoire.");
+  if (!rows.length) globalMsgs.push("Ajoutez au moins une ligne.");
+
+  const ouvrageIndex = await DB.ouvrageIndex(s.chantier.id);
+  const rowErrors = validateSaisieRows(rows, ouvrageIndex);
+
+  document.querySelectorAll("#sa-tbody tr").forEach((tr) => (tr.style.background = ""));
+  if (globalMsgs.length || rowErrors.length) {
+    errs.innerHTML = `
+      ${globalMsgs.length ? `<div class="formerr" style="margin-top:12px">${globalMsgs.map(esc).join("<br>")}</div>` : ""}
+      ${rowErrors.length ? `<div class="formerr" style="margin-top:12px">${rowErrors.map((e) => `Ligne ${e.index} : ${e.msgs.map(esc).join(" ; ")}`).join("<br>")}</div>` : ""}
+    `;
+    rowErrors.forEach((e) => { const tr = document.querySelector(`#sa-tbody tr[data-row="${e.key}"]`); if (tr) tr.style.background = "var(--red-bg)"; });
+    return;
+  }
+
+  const btn = $("#sa-save"); btn.disabled = true; btn.textContent = "Enregistrement…";
+  const res = await DB.declarationCreate(s.chantier.id, { date, equipe, localCode, corpsMetierCode, lignes: rows }, s.user.id);
+  btn.disabled = false; btn.textContent = "Enregistrer la déclaration";
+  if (res.error) return toast(res.error, "err");
+
+  toast(`Déclaration enregistrée — ${rows.length} ligne${rows.length > 1 ? "s" : ""}.` + (res.lignesInconnues.length ? ` ${res.lignesInconnues.length} repère(s) inconnu(s) signalé(s) à l'ingénieur DATA.` : ""));
+  renderSaisie(Session.get());
+}
+
+async function paintDeclarationsRecentes(s) {
+  const box = $("#sa-recent");
+  const list = await DB.declarationRecent(s.chantier.id, { limit: 20 });
+  if (!list.length) { box.innerHTML = `<div class="hint">Aucune déclaration pour l'instant.</div>`; return; }
+  box.innerHTML = `
+    <table class="grid">
+      <thead><tr><th>Date</th><th>Local</th><th>Corps de métier</th><th>Équipe</th><th>Lignes</th><th>Saisi par</th><th></th></tr></thead>
+      <tbody>${list.map((d) => `
+        <tr>
+          <td class="mono">${esc(d.date)}</td>
+          <td class="mono">${esc(d.local)}</td>
+          <td>${esc(d.corpsMetier)}</td>
+          <td>${esc(d.equipe || "—")}</td>
+          <td>${d.lignesCount}</td>
+          <td>${esc(d.auteurNom)}</td>
+          <td><button class="btn ghost small sa-open" data-id="${d.id}" type="button">Ouvrir</button></td>
+        </tr>`).join("")}</tbody>
+    </table>
+    <div id="sa-detail" style="margin-top:14px"></div>
+  `;
+  box.querySelectorAll(".sa-open").forEach((btn) => (btn.onclick = () => paintDeclarationDetail(s, btn.dataset.id)));
+}
+
+async function paintDeclarationDetail(s, declarationId) {
+  const box = $("#sa-detail");
+  box.innerHTML = `<div class="hint">Chargement…</div>`;
+  const d = await DB.declarationGet(s.chantier.id, declarationId);
+  if (!d) { box.innerHTML = `<div class="hint">Déclaration introuvable.</div>`; return; }
+
+  box.innerHTML = `
+    <div class="card">
+      <div class="spread"><h3 style="margin:0">Déclaration du ${esc(d.declaration.date)} — ${esc(d.declaration.local)}</h3><button class="btn ghost small" id="sa-close" type="button">Fermer</button></div>
+      <table class="grid" style="margin-top:8px">
+        <thead><tr><th>Repère</th><th>Activité</th><th>Valeur</th><th>Commentaire</th><th>Points bloquants</th><th>Soldé</th><th>Historique</th></tr></thead>
+        <tbody>${d.lignes.map((l) => `
+          <tr data-ligne="${l.id}">
+            <td class="mono">${esc(l.repere)}</td>
+            <td>${esc(l.activiteLibelle || "—")}</td>
+            <td>${l.nature === "quantite"
+              ? `<input class="inp lg-quantite" type="number" step="any" style="width:90px" value="${l.quantite != null ? l.quantite : ""}"> <span class="muted" style="font-size:11px">${esc(l.unite || "")}</span>`
+              : (l.operations || []).map((o) => `<label style="display:block;font-size:12px;font-weight:400"><input type="checkbox" class="lg-op" value="${esc(o.code)}"${(l.operationsFaites || []).includes(o.code) ? " checked" : ""}> ${esc(o.libelle)}</label>`).join("")}</td>
+            <td><input class="inp lg-commentaire" value="${esc(l.commentaire || "")}"></td>
+            <td><input class="inp lg-bloquants" value="${esc(l.pointsBloquants || "")}"></td>
+            <td style="text-align:center"><input type="checkbox" class="lg-solde"${l.solde ? " checked" : ""}></td>
+            <td><button class="btn ghost small lg-hist" type="button">Voir</button><div class="lg-hist-box"></div></td>
+          </tr>`).join("")}</tbody>
+      </table>
+      <button class="btn primary small" id="sa-save-corr" style="margin-top:10px" type="button">Enregistrer les corrections</button>
+    </div>
+  `;
+  $("#sa-close").onclick = () => { box.innerHTML = ""; };
+  box.querySelectorAll(".lg-hist").forEach((btn) => (btn.onclick = async () => {
+    const tr = btn.closest("tr");
+    const hb = tr.querySelector(".lg-hist-box");
+    const j = await DB.journalFor(s.chantier.id, "ligne_declaration", tr.dataset.ligne);
+    hb.innerHTML = j.length
+      ? `<div style="margin-top:6px;font-size:11px" class="hint">${j.map((x) => `${esc(x.champ)} : « ${esc(String(x.avant))} » → « ${esc(String(x.apres))} » — ${esc(x.auteurNom)}, ${esc((x.faitLe || "").slice(0, 16).replace("T", " "))}`).join("<br>")}</div>`
+      : `<div class="hint" style="margin-top:6px">Aucune correction.</div>`;
+  }));
+  $("#sa-save-corr").onclick = async () => {
+    const btn = $("#sa-save-corr"); btn.disabled = true; btn.textContent = "Enregistrement…";
+    for (const l of d.lignes) {
+      const tr = box.querySelector(`tr[data-ligne="${l.id}"]`);
+      const patch = {
+        commentaire: tr.querySelector(".lg-commentaire").value.trim(),
+        pointsBloquants: tr.querySelector(".lg-bloquants").value.trim(),
+        solde: tr.querySelector(".lg-solde").checked,
+      };
+      if (l.nature === "quantite") {
+        const v = tr.querySelector(".lg-quantite").value;
+        patch.quantite = v !== "" ? Number(v) : null;
+      } else {
+        patch.operationsFaites = [...tr.querySelectorAll(".lg-op:checked")].map((c) => c.value);
+      }
+      await DB.ligneUpdate(s.chantier.id, l.id, patch, s.user.id);
+    }
+    toast("Corrections enregistrées.");
+    paintDeclarationDetail(s, declarationId);
+  };
 }
 
 </script>
